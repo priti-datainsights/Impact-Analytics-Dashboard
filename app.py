@@ -103,6 +103,7 @@ if not st.session_state["logged_in_email"]:
         )
         st.markdown("---")
         oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, REVOKE_TOKEN_URL)
+        # Note: OAuth2Component might not support `width="stretch"` yet, leaving `use_container_width` here safely.
         result = oauth2.authorize_button(
             name="Sign in with Google",
             icon="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg",
@@ -226,15 +227,15 @@ if st.session_state["current_page"] == "home":
     col1, col2, col3, *_ = st.columns(4)
     with col1:
         st.markdown("<h1 style='text-align:center;font-size:4rem;'>📈</h1>", unsafe_allow_html=True)
-        if st.button("Impact Analytics Dashboard", use_container_width=True):
+        if st.button("Impact Analytics Dashboard", width="stretch"):
             st.session_state["current_page"] = "dashboard"; st.rerun()
     with col2:
         st.markdown("<h1 style='text-align:center;font-size:4rem;'>🏛️</h1>", unsafe_allow_html=True)
-        if st.button("Longitudinal Analysis", use_container_width=True):
+        if st.button("Longitudinal Analysis", width="stretch"):
             st.session_state["current_page"] = "longitudinal"; st.rerun()
     with col3:
         st.markdown("<h1 style='text-align:center;font-size:4rem;'>🏢</h1>", unsafe_allow_html=True)
-        if st.button("Operations & Impact Command Center", use_container_width=True):
+        if st.button("Operations & Impact Command Center", width="stretch"):
             st.session_state["current_page"] = "ops"; st.rerun()
     st.stop()
 
@@ -251,10 +252,10 @@ if st.session_state["current_page"] == "ops":
         st.success(f"👤 **{st.session_state['user_first_name']}**")
         nc1, nc2 = st.columns(2)
         with nc1:
-            if st.button("🏠 Home", use_container_width=True, key="nav_home_ops"):
+            if st.button("🏠 Home", width="stretch", key="nav_home_ops"):
                 st.session_state["current_page"] = "home"; st.rerun()
         with nc2:
-            if st.button("Sign Out", use_container_width=True, key="signout_ops"):
+            if st.button("Sign Out", width="stretch", key="signout_ops"):
                 st.session_state.update({
                     "logged_in_email": None,
                     "user_first_name": "User",
@@ -374,10 +375,10 @@ if st.session_state["current_page"] == "longitudinal":
         st.success(f"👤 **{st.session_state['user_first_name']}**")
         nc1, nc2 = st.columns(2)
         with nc1:
-            if st.button("🏠 Home", use_container_width=True, key="nav_home_long"):
+            if st.button("🏠 Home", width="stretch", key="nav_home_long"):
                 st.session_state["current_page"] = "home"; st.rerun()
         with nc2:
-            if st.button("Sign Out", use_container_width=True, key="signout_long"):
+            if st.button("Sign Out", width="stretch", key="signout_long"):
                 st.session_state.update({"logged_in_email": None, "user_first_name": "User", "current_page": "home"})
                 st.rerun()
         st.markdown("---")
@@ -487,7 +488,7 @@ if st.session_state["current_page"] == "longitudinal":
                     plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30),
                     legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""),
                 )
-                st.plotly_chart(fig_cat, use_container_width=True)
+                st.plotly_chart(fig_cat, width="stretch")
             with col_m2:
                 st.info(
                     "Only students present in **both** endlines are shown. "
@@ -598,7 +599,7 @@ if st.session_state["current_page"] == "longitudinal":
                                 ),
                                 height=380,
                             )
-                            st.plotly_chart(fig_g, use_container_width=True)
+                            st.plotly_chart(fig_g, width="stretch")
 
                             try:
                                 g24 = grade_slope[grade_slope["Year"] == "AY 24-25"].set_index("Subject")["Avg Score"]
@@ -640,7 +641,7 @@ if st.session_state["current_page"] == "longitudinal":
                         xaxis_title="", yaxis_title="Avg Score (AY 25-26 Endline)",
                         plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30), showlegend=False,
                     )
-                    st.plotly_chart(fig_gen, use_container_width=True)
+                    st.plotly_chart(fig_gen, width="stretch")
                 with col_g2:
                     try:
                         g_b = g25_avg[g25_avg["Gender"] == "Boy"]["Obtained Marks"].values
@@ -711,7 +712,7 @@ if st.session_state["current_page"] == "longitudinal":
             )
             fig_grade_line.update_xaxes(showgrid=False, linecolor="black")
             fig_grade_line.update_yaxes(showgrid=True, gridcolor="lightgrey", zeroline=False)
-            st.plotly_chart(fig_grade_line, use_container_width=True)
+            st.plotly_chart(fig_grade_line, width="stretch")
 
         with col_sw2:
             st.markdown(f"#### R.I.S.E by Grade — {sel_ay_sv}")
@@ -737,7 +738,7 @@ if st.session_state["current_page"] == "longitudinal":
                     margin=dict(l=0, r=0, t=30),
                     legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5, title=""),
                 )
-                st.plotly_chart(fig_grade_rise, use_container_width=True)
+                st.plotly_chart(fig_grade_rise, width="stretch")
 
         st.markdown("---")
         st.markdown("#### Grade-Wise YoY Score Change (AY24-25 → AY25-26 Endline)")
@@ -772,7 +773,7 @@ if st.session_state["current_page"] == "longitudinal":
                 plot_bgcolor="rgba(0,0,0,0)", xaxis_title="Grade",
                 yaxis_title="YoY Endline Score Change",
             )
-            st.plotly_chart(fig_yoy_grade, use_container_width=True)
+            st.plotly_chart(fig_yoy_grade, width="stretch")
         else:
             st.info(
                 "Both years' endline data needed for YoY grade comparison. "
@@ -803,7 +804,7 @@ if st.session_state["current_page"] == "longitudinal":
                 showlegend=False, margin=dict(l=0, r=0, t=30),
                 plot_bgcolor="rgba(0,0,0,0)", xaxis_title="", yaxis_title="YoY Endline Score Change",
             )
-            st.plotly_chart(fig_yoys, use_container_width=True)
+            st.plotly_chart(fig_yoys, width="stretch")
         else:
             st.info(
                 "Both years' endline data needed for YoY subject comparison. "
@@ -830,7 +831,7 @@ if st.session_state["current_page"] == "longitudinal":
             )
             fig_sa.update_xaxes(showgrid=False, linecolor="black")
             fig_sa.update_yaxes(showgrid=True, gridcolor="lightgrey", zeroline=False)
-            st.plotly_chart(fig_sa, use_container_width=True)
+            st.plotly_chart(fig_sa, width="stretch")
 
         with col_g2:
             st.markdown("#### State-wise R.I.S.E Shift")
@@ -848,7 +849,7 @@ if st.session_state["current_page"] == "longitudinal":
                 barmode="stack", yaxis_title="% of Students", margin=dict(l=0, r=0, t=30),
                 legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5, title=""),
             )
-            st.plotly_chart(fig_sg, use_container_width=True)
+            st.plotly_chart(fig_sg, width="stretch")
 
         st.markdown("---")
         st.markdown("#### State-wise YoY Score Change")
@@ -868,7 +869,7 @@ if st.session_state["current_page"] == "longitudinal":
                 showlegend=False, margin=dict(l=0, r=0, t=30),
                 plot_bgcolor="rgba(0,0,0,0)", xaxis_title="", yaxis_title="YoY Score Change",
             )
-            st.plotly_chart(fig_yst, use_container_width=True)
+            st.plotly_chart(fig_yst, width="stretch")
         else:
             st.info("Both years' endline data needed for state YoY comparison.")
 
@@ -899,7 +900,7 @@ if st.session_state["current_page"] == "longitudinal":
                 )
                 fig_ca.update_xaxes(showgrid=False, linecolor="black")
                 fig_ca.update_yaxes(showgrid=True, gridcolor="lightgrey", zeroline=False)
-                st.plotly_chart(fig_ca, use_container_width=True)
+                st.plotly_chart(fig_ca, width="stretch")
 
             with col_c2:
                 st.markdown("#### R.I.S.E Distribution by Year")
@@ -915,7 +916,7 @@ if st.session_state["current_page"] == "longitudinal":
                     barmode="stack", yaxis_title="% of Students", margin=dict(l=0, r=0, t=30),
                     legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5, title=""),
                 )
-                st.plotly_chart(fig_cc, use_container_width=True)
+                st.plotly_chart(fig_cc, width="stretch")
 
             st.markdown("---")
             st.markdown("#### Centre vs All Centres Benchmark")
@@ -939,7 +940,7 @@ if st.session_state["current_page"] == "longitudinal":
                     xaxis_title="", yaxis_title="Avg Endline Score", margin=dict(l=0, r=0, t=30),
                     legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""),
                 )
-                st.plotly_chart(fig_bench, use_container_width=True)
+                st.plotly_chart(fig_bench, width="stretch")
 
             st.markdown("---")
             st.markdown("#### Gender Breakdown (AY 25-26 Endline)")
@@ -955,7 +956,7 @@ if st.session_state["current_page"] == "longitudinal":
                     xaxis_title="", yaxis_title="Avg Score",
                     plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30), showlegend=False,
                 )
-                st.plotly_chart(fig_gen_c, use_container_width=True)
+                st.plotly_chart(fig_gen_c, width="stretch")
             else:
                 st.info("No gender data for this centre in AY 25-26.")
 
@@ -974,7 +975,7 @@ if st.session_state["current_page"] == "longitudinal":
             ).strip()
         with b_col:
             st.write("")
-            st.button("🔍 Search", use_container_width=True, key="student_search_btn")
+            st.button("🔍 Search", width="stretch", key="student_search_btn")
 
         with st.expander("Or pick a student from the current filtered view", expanded=False):
             ids_in_filter = [""] + sorted(filtered_df_long["Student ID"].dropna().unique())
@@ -1114,7 +1115,7 @@ if st.session_state["current_page"] == "longitudinal":
                     margin=dict(l=0, r=0, t=50, b=10),
                     height=300,
                 )
-                st.plotly_chart(fig_stu, use_container_width=True)
+                st.plotly_chart(fig_stu, width="stretch")
 
             st.markdown("---")
             st.markdown("#### 🔄 R.I.S.E Tier Journey (All Subjects)")
@@ -1132,16 +1133,22 @@ if st.session_state["current_page"] == "longitudinal":
                 category_orders={"Timepoint": TP_ORDER},
             )
             fig_mig.update_traces(marker=dict(size=13), line=dict(width=2))
+            
+            # FLAT Y-AXIS UPDATE TO PREVENT DICT SYNTAX ERRORS
+            fig_mig.update_yaxes(
+                tickvals=,
+                ticktext=["🔴 Reviving", "🔵 Initiating", "🟢 Shaping", "🔴 Evolving"],
+                range=[0.5, 4.5], 
+                showgrid=True, 
+                gridcolor="#eee"
+            )
+            fig_mig.update_xaxes(showgrid=False, linecolor="black")
             fig_mig.update_layout(
-                yaxis=dict(
-                    tickvals=,
-                    ticktext=["🔴 Reviving", "🔵 Initiating", "🟢 Shaping", "🔴 Evolving"],
-                    range=[0.5, 4.5], showgrid=True, gridcolor="#eee",
-                ),
-                plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30),
-                xaxis=dict(showgrid=False, linecolor="black"),
+                plot_bgcolor="rgba(0,0,0,0)", 
+                margin=dict(l=0, r=0, t=30),
                 height=320,
             )
+            
             for lvl, clr in [
                 (1, "rgba(242,124,72,0.07)"),
                 (2, "rgba(0,148,201,0.07)"),
@@ -1149,7 +1156,7 @@ if st.session_state["current_page"] == "longitudinal":
                 (4, "rgba(237,28,45,0.07)"),
             ]:
                 fig_mig.add_hrect(y0=lvl-0.45, y1=lvl+0.45, fillcolor=clr, line_width=0)
-            st.plotly_chart(fig_mig, use_container_width=True)
+            st.plotly_chart(fig_mig, width="stretch")
 
             if not el24_s.empty and not el25_s.empty and shared_subs:
                 improved, declined = [], []
@@ -1184,10 +1191,10 @@ with st.sidebar:
     st.success(f"👤 **{st.session_state['user_first_name']}**")
     nc1, nc2 = st.columns(2)
     with nc1:
-        if st.button("🏠 Home", use_container_width=True, key="nav_home_main"):
+        if st.button("🏠 Home", width="stretch", key="nav_home_main"):
             st.session_state["current_page"] = "home"; st.rerun()
     with nc2:
-        if st.button("Sign Out", use_container_width=True, key="signout_main"):
+        if st.button("Sign Out", width="stretch", key="signout_main"):
             st.session_state.update({"logged_in_email": None, "user_first_name": "User", "current_page": "home"})
             st.rerun()
     st.markdown("---")
@@ -1290,7 +1297,7 @@ with st.sidebar:
                     st.error(f"Error appending file: {e}")
 
     if len(st.session_state["appended_files"]) > 0:
-        if st.button("🗑️ Clear Appended Data", use_container_width=True):
+        if st.button("🗑️ Clear Appended Data", width="stretch"):
             st.session_state["master_df"] = base_df_loaded.copy()
             st.session_state["appended_files"].clear()
             st.rerun()
@@ -1356,7 +1363,7 @@ with tab1:
         fig_box = px.box(filtered_df, x="Academic Year", y="Obtained Marks",
                          color="Academic Year", color_discrete_map=COLOR_MAP, points="all")
         fig_box.update_layout(showlegend=False, margin=dict(l=0,r=0,t=30))
-        st.plotly_chart(fig_box, use_container_width=True)
+        st.plotly_chart(fig_box, width="stretch")
     with cb:
         st.markdown("#### 🧬 R.I.S.E Category Shift")
         cc = filtered_df.groupby(["Academic Year","Category"]).size().reset_index(name="Count")
@@ -1366,7 +1373,7 @@ with tab1:
                           color_discrete_map=COLOR_MAP, category_orders={"Category": RISE_ORDER})
         fig_rise.update_layout(barmode="group", margin=dict(l=0,r=0,t=30),
                                 legend=dict(orientation="h",yanchor="top",y=-0.15,xanchor="center",x=0.5,title=""))
-        st.plotly_chart(fig_rise, use_container_width=True)
+        st.plotly_chart(fig_rise, width="stretch")
 
 # ── TAB 2: SUBJECT DEEP-DIVE ─────────────────────────────────
 with tab2:
@@ -1390,7 +1397,7 @@ with tab2:
                                category_orders={"Category": RISE_ORDER})
                 fig_g.update_layout(barmode="stack", yaxis_title="% of Students", margin=dict(l=0,r=0,t=30),
                                     legend=dict(orientation="h",yanchor="top",y=-0.15,xanchor="center",x=0.5,title=""))
-                st.plotly_chart(fig_g, use_container_width=True)
+                st.plotly_chart(fig_g, width="stretch")
             else:
                 st.info(f"No {lbl} data.")
 
@@ -1433,7 +1440,7 @@ with tab3:
                              legend=dict(orientation="h",yanchor="top",y=-0.2,xanchor="center",x=0.5,title=""))
         fig_st.update_xaxes(title_text="")
         fig_st.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-        st.plotly_chart(fig_st, use_container_width=True)
+        st.plotly_chart(fig_st, width="stretch")
 
     st.markdown("---"); st.markdown("#### Top 10 Centres (by % Evolving)")
     if not filtered_df.empty:
@@ -1450,7 +1457,7 @@ with tab3:
                         category_orders={"Category":RISE_ORDER})
         fig_tc.update_layout(barmode="stack",xaxis_title="% of Students",yaxis_title="",margin=dict(l=0,r=0,t=30),
                              legend=dict(orientation="h",yanchor="top",y=-0.15,xanchor="center",x=0.5,title=""))
-        st.plotly_chart(fig_tc, use_container_width=True)
+        st.plotly_chart(fig_tc, width="stretch")
 
 # ── TAB 4: STUDENT-LEVEL IMPACT ──────────────────────────────
 with tab4:
@@ -1484,7 +1491,7 @@ with tab4:
             fig_heat.update_coloraxes(showscale=False)
             fig_heat.update_layout(margin=dict(l=0,r=0,t=30,b=0),height=500)
             _, hc, _ = st.columns(3)
-            with hc: st.plotly_chart(fig_heat, use_container_width=True)
+            with hc: st.plotly_chart(fig_heat, width="stretch")
         else:
             st.warning("No matched Student ID + Subject pairs between BL and EL.")
     else:
@@ -1515,7 +1522,7 @@ with tab5:
                                 barmode="group",color_discrete_map=COLOR_MAP,text_auto=".2f")
                 fig_ga.update_layout(yaxis_title="Avg Marks",margin=dict(l=0,r=0,t=30),
                                      legend=dict(orientation="h",yanchor="top",y=-0.15,xanchor="center",x=0.5,title=""))
-                st.plotly_chart(fig_ga,use_container_width=True)
+                st.plotly_chart(fig_ga,width="stretch")
             with gc2:
                 gc_d = gdf.groupby(["Gender","Academic Year","Category"]).size().reset_index(name="Count")
                 gc_d["Pct"] = gc_d.groupby(["Gender","Academic Year"])["Count"].transform(lambda x: x/x.sum()*100)
@@ -1527,7 +1534,7 @@ with tab5:
                                      legend=dict(orientation="h",yanchor="top",y=-0.2,xanchor="center",x=0.5,title=""))
                 fig_gc.update_xaxes(title_text="")
                 fig_gc.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-                st.plotly_chart(fig_gc,use_container_width=True)
+                st.plotly_chart(fig_gc,width="stretch")
         else:
             st.info("No valid gender data in current selection.")
     else:
@@ -1569,7 +1576,7 @@ with tab6:
             fig_rtm.add_hline(y=0,line_dash="dash",line_color="black",
                               annotation_text="No Change",annotation_position="bottom right")
             fig_rtm.update_layout(margin=dict(l=0,r=0,t=30))
-            st.plotly_chart(fig_rtm,use_container_width=True)
+            st.plotly_chart(fig_rtm,width="stretch")
             try:
                 rtm["Quintile"]=pd.qcut(rtm["Obtained Marks_BL"],q=5,duplicates="drop")
                 bstats=rtm.groupby("Quintile",observed=False).agg(
@@ -1587,7 +1594,7 @@ with tab6:
                 fig_bin.add_hline(y=0,line_dash="solid",line_color="black",line_width=1)
                 fig_bin.update_traces(textposition="outside")
                 fig_bin.update_layout(margin=dict(l=0,r=0,t=30,b=40),coloraxis_showscale=False)
-                st.plotly_chart(fig_bin,use_container_width=True)
+                st.plotly_chart(fig_bin,width="stretch")
             except ValueError:
                 st.info("Not enough variance for quintile bins.")
             r2_val=corr**2 if not pd.isna(corr) else 0
@@ -1612,7 +1619,7 @@ with st.sidebar:
         if st.session_state.get("ready_ppt_donor") != selected_donors:
             st.session_state.pop("ready_ppt", None); st.session_state.pop("ready_ppt_donor", None)
 
-        if st.button(f"⚙️ Prepare PPTX for {selected_donors}", use_container_width=True):
+        if st.button(f"⚙️ Prepare PPTX for {selected_donors}", width="stretch"):
             with st.spinner("Generating presentation…"):
                 try:
                     from pptx import Presentation
