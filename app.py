@@ -47,6 +47,7 @@ RISE_COLORS_LONG = RISE_COLORS
 RISE_ORDER = ["Reviving", "Initiating", "Shaping", "Evolving"]
 AY_ORDER   = ["AY24-25", "AY25-26"]
 
+# AY 25-26 uses 2-letter state abbreviations; normalise to full names
 STATE_ABBR = {
     "AP": "Andhra Pradesh", "AS": "Assam",         "BR": "Bihar",
     "GJ": "Gujarat",        "JH": "Jharkhand",     "KA": "Karnataka",
@@ -55,12 +56,17 @@ STATE_ABBR = {
     "UK": "Uttarakhand",    "UP": "Uttar Pradesh",
 }
 
+# Subject name normalisation across both workbooks:
+#   "Maths"                  → "Math"              (AY24-25 spelling)
+#   "Basic Digital Literacy" → "Digital Literacy"  (AY24-25 long form)
+#   "DL"                     → "Digital Literacy"  (AY25-26 abbreviation)
 SUBJECT_NORM = {
     "Maths":                  "Math",
     "Basic Digital Literacy": "Digital Literacy",
     "DL":                     "Digital Literacy",
 }
 
+# Sentinel used in clean_sheet for rows that have no Gender column (AY 24-25)
 NO_GENDER = "__NO_GENDER__"
 
 
@@ -103,7 +109,6 @@ if not st.session_state["logged_in_email"]:
         )
         st.markdown("---")
         oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, REVOKE_TOKEN_URL)
-        # Note: OAuth2Component might not support `width="stretch"` yet, leaving `use_container_width` here safely.
         result = oauth2.authorize_button(
             name="Sign in with Google",
             icon="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg",
@@ -115,7 +120,7 @@ if not st.session_state["logged_in_email"]:
         if result and "token" in result:
             id_token = result["token"]["id_token"]
             if isinstance(id_token, list):
-                id_token = id_token
+                id_token = id_token[0]
             verify_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
             try:
                 with urllib.request.urlopen(verify_url) as resp:
@@ -133,6 +138,15 @@ if not st.session_state["logged_in_email"]:
 # SHARED SIDEBAR FILTER BUILDER
 # ==========================================
 def build_filter_sidebar(df: pd.DataFrame, key_prefix: str):
+    """
+    Cascading State → Donor → Centre → Subject → Grade → Gender filters.
+
+    BUG FIX: The gender filter now only filters rows that HAVE a known gender
+    (i.e. rows from AY 25-26). Rows where Gender == NO_GENDER (all AY 24-25
+    rows, which have no gender column) are always kept regardless of the
+    gender selection. This prevents the gender multiselect from silently
+    wiping out all AY 24-25 data.
+    """
     sel = {}
     st.sidebar.header("🎯 Global Filters")
 
@@ -168,6 +182,7 @@ def build_filter_sidebar(df: pd.DataFrame, key_prefix: str):
 
     # Grade
     if key_prefix == "long":
+        # Longitudinal: derive cohort from AY24-25 grades, then track into AY25-26
         base_yr = dff[dff["Academic Year"] == "AY24-25"] if "Academic Year" in dff.columns else dff
         grades = sorted(base_yr["Grade"].dropna().astype(str).unique()) if "Grade" in base_yr.columns else []
         sel_grades = st.sidebar.multiselect(
@@ -187,7 +202,11 @@ def build_filter_sidebar(df: pd.DataFrame, key_prefix: str):
         dff = dff[dff["Grade"].astype(str).isin(sel_grades)] if sel_grades else dff.iloc[0:0]
     sel["grades"] = sel_grades
 
-    # Gender
+    # ── Gender filter ────────────────────────────────────────────────────────
+    # CRITICAL FIX: AY 24-25 rows carry Gender == NO_GENDER (a sentinel, not a
+    # real gender value). We must NOT drop those rows when the user selects
+    # genders — the filter should only restrict rows that have a real gender.
+    # Implementation: keep (Gender in selected) OR (Gender == NO_GENDER).
     if "Gender" in dff.columns:
         real_gender_rows = dff[~dff["Gender"].astype(str).isin([NO_GENDER, "nan", "none", "null", ""])]
         genders = sorted(real_gender_rows["Gender"].astype(str).unique())
@@ -196,6 +215,7 @@ def build_filter_sidebar(df: pd.DataFrame, key_prefix: str):
                 "Select Gender(s) — applies to AY 25-26 only",
                 options=genders, default=genders, key=f"{key_prefix}_gender",
             )
+            # Keep rows that match selection OR have no gender data (AY 24-25)
             mask = (
                 dff["Gender"].astype(str).isin(sel_g) |
                 dff["Gender"].astype(str).isin([NO_GENDER, "nan", "none", "null", ""])
@@ -227,15 +247,15 @@ if st.session_state["current_page"] == "home":
     col1, col2, col3, *_ = st.columns(4)
     with col1:
         st.markdown("<h1 style='text-align:center;font-size:4rem;'>📈</h1>", unsafe_allow_html=True)
-        if st.button("Impact Analytics Dashboard", width="stretch"):
+        if st.button("Impact Analytics Dashboard", use_container_width=True):
             st.session_state["current_page"] = "dashboard"; st.rerun()
     with col2:
         st.markdown("<h1 style='text-align:center;font-size:4rem;'>🏛️</h1>", unsafe_allow_html=True)
-        if st.button("Longitudinal Analysis", width="stretch"):
+        if st.button("Longitudinal Analysis", use_container_width=True):
             st.session_state["current_page"] = "longitudinal"; st.rerun()
     with col3:
         st.markdown("<h1 style='text-align:center;font-size:4rem;'>🏢</h1>", unsafe_allow_html=True)
-        if st.button("Operations & Impact Command Center", width="stretch"):
+        if st.button("Operations & Impact Command Center", use_container_width=True):
             st.session_state["current_page"] = "ops"; st.rerun()
     st.stop()
 
@@ -244,6 +264,7 @@ if st.session_state["current_page"] == "home":
 # OPS DASHBOARD MODULE
 # ==========================================
 if st.session_state["current_page"] == "ops":
+    # Sidebar nav (mirrors the other modules)
     with st.sidebar:
         try:
             st.image("evidyaloka_logo.png", width=273)
@@ -252,10 +273,10 @@ if st.session_state["current_page"] == "ops":
         st.success(f"👤 **{st.session_state['user_first_name']}**")
         nc1, nc2 = st.columns(2)
         with nc1:
-            if st.button("🏠 Home", width="stretch", key="nav_home_ops"):
+            if st.button("🏠 Home", use_container_width=True, key="nav_home_ops"):
                 st.session_state["current_page"] = "home"; st.rerun()
         with nc2:
-            if st.button("Sign Out", width="stretch", key="signout_ops"):
+            if st.button("Sign Out", use_container_width=True, key="signout_ops"):
                 st.session_state.update({
                     "logged_in_email": None,
                     "user_first_name": "User",
@@ -263,6 +284,7 @@ if st.session_state["current_page"] == "ops":
                 })
                 st.rerun()
 
+    # Import and render — ops_dashboard.py must sit alongside app.py
     try:
         from ops_dashboard import render_ops_dashboard
         render_ops_dashboard()
@@ -280,16 +302,30 @@ if st.session_state["current_page"] == "ops":
 FILE_24 = "EL-BL-Data-AY-24-25.xlsx"
 FILE_25 = "BL-EL-AY-25-26-Final-AllSubjects.xlsx"
 
+
 @st.cache_data(show_spinner=False)
 def load_multi_year_data(src_24, src_25):
+    """
+    Loads both workbooks and returns a single normalised DataFrame.
+
+    Key normalisations:
+    - State abbreviations → full names (AY25-26 uses 2-letter codes)
+    - "Maths" → "Math" (AY24-25 spelling)
+    - Gender: title-cased and stripped; rows WITHOUT a gender column
+      (all AY24-25 rows) receive Gender = NO_GENDER sentinel so the
+      sidebar gender filter can distinguish them from genuinely unknown values.
+    - Student ID → clean string via Int64 path (numeric) or upper-stripped (alphanumeric)
+    """
     def clean_sheet(df_raw, year: str, period: str) -> pd.DataFrame:
         if df_raw.empty:
             return pd.DataFrame()
         df = df_raw.copy()
 
+        # Rubrics → Category
         if "Rubrics" in df.columns and "Category" not in df.columns:
             df.rename(columns={"Rubrics": "Category"}, inplace=True)
 
+        # Robust Student ID: numeric → Int64 → str; alphanumeric → upper + strip
         raw_ids     = df.get("Student ID", pd.Series(dtype=object)).copy()
         numeric_ids = pd.to_numeric(raw_ids, errors="coerce")
         is_num      = numeric_ids.notna()
@@ -300,21 +336,28 @@ def load_multi_year_data(src_24, src_25):
             ["NA", "NAN", "NONE", "NULL", "<NA>", ""]
         ), "Student ID"] = pd.NA
 
+        # Normalise State (expand 2-letter codes used by AY25-26)
         if "State" in df.columns:
             df["State"] = df["State"].astype(str).str.strip().map(lambda x: STATE_ABBR.get(x, x))
 
+        # Normalise Subject
         if "Subject" in df.columns:
             df["Subject"] = df["Subject"].astype(str).str.strip().map(lambda x: SUBJECT_NORM.get(x, x))
 
+        # Gender handling — CRITICAL:
+        # AY24-25 workbook has NO Gender column. We use the NO_GENDER sentinel
+        # so the sidebar gender filter can keep these rows unconditionally.
         if "Gender" in df.columns:
             df["Gender"] = (
                 df["Gender"].astype(str).str.strip().str.title()
-                .str.replace(r"\s+", "", regex=True)
+                .str.replace(r"\s+", "", regex=True)   # "Boy " → "Boy"
             )
+            # Replace residual junk values with sentinel
             df.loc[df["Gender"].str.lower().isin(["nan", "none", "null", ""]), "Gender"] = NO_GENDER
         else:
             df["Gender"] = NO_GENDER
 
+        # Other string columns
         for col in ["Centre Name", "Donor", "Category"]:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
@@ -343,10 +386,10 @@ def load_multi_year_data(src_24, src_25):
         sheets24 = xls24.sheet_names
         sheets25 = xls25.sheet_names
 
-        bl24 = clean_sheet(pd.read_excel(src_24, sheet_name=sheets24),                              "AY24-25", "Baseline")
-        el24 = clean_sheet(pd.read_excel(src_24, sheet_name=sheets24 if len(sheets24) > 1 else 0), "AY24-25", "Endline")
-        bl25 = clean_sheet(pd.read_excel(src_25, sheet_name=sheets25),                              "AY25-26", "Baseline")
-        el25 = clean_sheet(pd.read_excel(src_25, sheet_name=sheets25 if len(sheets25) > 1 else 0), "AY25-26", "Endline")
+        bl24 = clean_sheet(pd.read_excel(src_24, sheet_name=sheets24[0]),                              "AY24-25", "Baseline")
+        el24 = clean_sheet(pd.read_excel(src_24, sheet_name=sheets24[1] if len(sheets24) > 1 else 0), "AY24-25", "Endline")
+        bl25 = clean_sheet(pd.read_excel(src_25, sheet_name=sheets25[0]),                              "AY25-26", "Baseline")
+        el25 = clean_sheet(pd.read_excel(src_25, sheet_name=sheets25[1] if len(sheets25) > 1 else 0), "AY25-26", "Endline")
 
         combined = pd.concat([bl24, el24, bl25, el25], ignore_index=True)
         return combined
@@ -367,6 +410,7 @@ if st.session_state["current_page"] == "longitudinal":
     )
     st.markdown("---")
 
+    # Sidebar nav
     with st.sidebar:
         try:
             st.image("evidyaloka_logo.png", width=273)
@@ -375,10 +419,10 @@ if st.session_state["current_page"] == "longitudinal":
         st.success(f"👤 **{st.session_state['user_first_name']}**")
         nc1, nc2 = st.columns(2)
         with nc1:
-            if st.button("🏠 Home", width="stretch", key="nav_home_long"):
+            if st.button("🏠 Home", use_container_width=True, key="nav_home_long"):
                 st.session_state["current_page"] = "home"; st.rerun()
         with nc2:
-            if st.button("Sign Out", width="stretch", key="signout_long"):
+            if st.button("Sign Out", use_container_width=True, key="signout_long"):
                 st.session_state.update({"logged_in_email": None, "user_first_name": "User", "current_page": "home"})
                 st.rerun()
         st.markdown("---")
@@ -388,6 +432,7 @@ if st.session_state["current_page"] == "longitudinal":
             "Tabs 1–3 additionally require matched Student IDs across both years."
         )
 
+    # File resolution
     src_24, src_25 = FILE_24, FILE_25
     if not (os.path.exists(FILE_24) and os.path.exists(FILE_25)):
         st.warning("Data files not found on disk. Upload them below.")
@@ -405,6 +450,7 @@ if st.session_state["current_page"] == "longitudinal":
         st.error("Could not load data. Check the uploaded files.")
         st.stop()
 
+    # Apply sidebar filters
     with st.sidebar:
         filtered_df_long, long_sel = build_filter_sidebar(df_long, key_prefix="long")
 
@@ -412,10 +458,18 @@ if st.session_state["current_page"] == "longitudinal":
         st.warning("⚠️ No data for the selected filters. Please adjust your criteria.")
         st.stop()
 
+    # ── Core slices ─────────────────────────────────────────────────────────
+    # BUG FIX: Do NOT assign pd.Categorical to the "Academic Year" column of
+    # df_endlines at this point. Apply it only immediately before plotting,
+    # and cast back to str for the actual chart x-axis argument so Plotly
+    # receives plain strings (preserving correct ordering via category_orders).
     df_el24     = filtered_df_long[filtered_df_long["Timepoint"] == "AY24-25 Endline"].copy()
     df_el25     = filtered_df_long[filtered_df_long["Timepoint"] == "AY25-26 Endline"].copy()
     df_endlines = filtered_df_long[filtered_df_long["Period"] == "Endline"].copy()
+    # Keep Academic Year as plain string — ordering is enforced via
+    # category_orders= in every px.line / px.bar call.
 
+    # Retained cohort (Student IDs present in both endlines)
     ids_24     = set(df_el24["Student ID"].dropna().unique())
     ids_25     = set(df_el25["Student ID"].dropna().unique())
     retained   = ids_24 & ids_25
@@ -423,6 +477,7 @@ if st.session_state["current_page"] == "longitudinal":
     df_ret_24  = df_el24[df_el24["Student ID"].isin(retained)] if not no_overlap else pd.DataFrame()
     df_ret_25  = df_el25[df_el25["Student ID"].isin(retained)] if not no_overlap else pd.DataFrame()
 
+    # Debug expander
     with st.expander("🛠️ Debug: ID Matching", expanded=False):
         dc1, dc2 = st.columns(2)
         with dc1:
@@ -447,6 +502,7 @@ if st.session_state["current_page"] == "longitudinal":
             st.write(f"AY24 sample → `{repr(one24)}` (len={len(one24)})")
             st.write(f"AY25 sample → `{repr(one25)}` (len={len(one25)})")
 
+    # ── TABS ────────────────────────────────────────────────────────────────
     (mig_tab, sub_tab, gen_tab,
      subj_tab, geo_tab, centre_tab, student_tab) = st.tabs([
         "📊 Migration",
@@ -458,6 +514,9 @@ if st.session_state["current_page"] == "longitudinal":
         "🔍 Student Lookup",
     ])
 
+    # ────────────────────────────────────────────────────────────────────────
+    # TAB 1: MIGRATION (retained cohort)
+    # ────────────────────────────────────────────────────────────────────────
     with mig_tab:
         st.markdown("### 🧱 Structural Tier Migration (Retained Cohort Only)")
         if no_overlap:
@@ -488,7 +547,7 @@ if st.session_state["current_page"] == "longitudinal":
                     plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30),
                     legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""),
                 )
-                st.plotly_chart(fig_cat, width="stretch")
+                st.plotly_chart(fig_cat, use_container_width=True)
             with col_m2:
                 st.info(
                     "Only students present in **both** endlines are shown. "
@@ -497,7 +556,7 @@ if st.session_state["current_page"] == "longitudinal":
                 try:
                     rv24 = cat24[cat24["Category"] == "Reviving"]["Pct"].values
                     rv25 = cat25[cat25["Category"] == "Reviving"]["Pct"].values
-                    diff = (rv25 if len(rv25) else 0)*100 - (rv24 if len(rv24) else 0)*100
+                    diff = (rv25[0] if len(rv25) else 0)*100 - (rv24[0] if len(rv24) else 0)*100
                     st.success(f"**🔍 'Reviving' proportion changed by {diff:+.1f}% YoY.**")
                     st.markdown(
                         "**💡** Excellent — the struggling base is shrinking."
@@ -507,6 +566,12 @@ if st.session_state["current_page"] == "longitudinal":
                 except Exception:
                     st.write("Insufficient category data for insights.")
 
+    # ────────────────────────────────────────────────────────────────────────
+    # TAB 2: SUBJECT EFFICACY — per-grade slopegraphs (all students, Endline only)
+    # Each grade gets its own slopegraph: x-axis = AY 24-25 | AY 25-26,
+    # one coloured line per subject present in that grade.
+    # Uses df_endlines (not the retained cohort) so every student is included.
+    # ────────────────────────────────────────────────────────────────────────
     with sub_tab:
         st.markdown("### 📈 Subject Efficacy — Per-Grade YoY Slopegraph")
         st.caption(
@@ -515,8 +580,11 @@ if st.session_state["current_page"] == "longitudinal":
             "single dot with no connecting line — that's expected given curriculum differences."
         )
 
+        # Build the endline-only slice with normalised subjects
+        # (SUBJECT_NORM now maps Basic Digital Literacy + DL → Digital Literacy)
         df_eff = df_endlines.copy()
 
+        # Numeric grade sort so Grade 10 doesn't precede Grade 5
         grades_eff = sorted(
             df_eff["Grade"].dropna().unique(),
             key=lambda x: int(x) if str(x).isdigit() else 99,
@@ -525,6 +593,7 @@ if st.session_state["current_page"] == "longitudinal":
         if df_eff.empty:
             st.info("No endline data available for the current filters.")
         else:
+            # Overall insight callout (across all grades, shared subjects only)
             try:
                 overall_24 = df_eff[df_eff["Academic Year"] == "AY24-25"].groupby("Subject")["Obtained Marks"].mean()
                 overall_25 = df_eff[df_eff["Academic Year"] == "AY25-26"].groupby("Subject")["Obtained Marks"].mean()
@@ -546,6 +615,7 @@ if st.session_state["current_page"] == "longitudinal":
 
             st.markdown("---")
 
+            # One slopegraph per grade, laid out in pairs (2 columns)
             grade_pairs = [grades_eff[i:i+2] for i in range(0, len(grades_eff), 2)]
 
             for pair in grade_pairs:
@@ -553,17 +623,20 @@ if st.session_state["current_page"] == "longitudinal":
                 for col_widget, grade in zip(cols, pair):
                     df_grade = df_eff[df_eff["Grade"] == grade]
 
+                    # Average endline score per subject per academic year for this grade
                     grade_slope = (
                         df_grade.groupby(["Academic Year", "Subject"])["Obtained Marks"]
                         .mean().reset_index()
                     )
                     grade_slope.rename(columns={"Academic Year": "Year", "Obtained Marks": "Avg Score"}, inplace=True)
+                    # Map "AY24-25" → "AY 24-25" for display consistency with the screenshot style
                     grade_slope["Year"] = grade_slope["Year"].map({"AY24-25": "AY 24-25", "AY25-26": "AY 25-26"})
 
                     with col_widget:
                         if grade_slope.empty:
                             st.info(f"Grade {grade}: no data.")
                         else:
+                            # Count students for the subtitle
                             n_students = df_grade["Student ID"].nunique()
                             subjects_in_grade = sorted(grade_slope["Subject"].unique())
 
@@ -599,8 +672,9 @@ if st.session_state["current_page"] == "longitudinal":
                                 ),
                                 height=380,
                             )
-                            st.plotly_chart(fig_g, width="stretch")
+                            st.plotly_chart(fig_g, use_container_width=True)
 
+                            # Compact insight: best and worst subject for this grade
                             try:
                                 g24 = grade_slope[grade_slope["Year"] == "AY 24-25"].set_index("Subject")["Avg Score"]
                                 g25 = grade_slope[grade_slope["Year"] == "AY 25-26"].set_index("Subject")["Avg Score"]
@@ -616,6 +690,9 @@ if st.session_state["current_page"] == "longitudinal":
 
                 st.markdown("---")
 
+    # ────────────────────────────────────────────────────────────────────────
+    # TAB 3: GENDER EQUITY (retained cohort, gender only in AY25-26)
+    # ────────────────────────────────────────────────────────────────────────
     with gen_tab:
         st.markdown("### 🚻 Gender Equity — AY 25-26 Endline (Retained Cohort)")
         st.caption(
@@ -641,11 +718,11 @@ if st.session_state["current_page"] == "longitudinal":
                         xaxis_title="", yaxis_title="Avg Score (AY 25-26 Endline)",
                         plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30), showlegend=False,
                     )
-                    st.plotly_chart(fig_gen, width="stretch")
+                    st.plotly_chart(fig_gen, use_container_width=True)
                 with col_g2:
                     try:
-                        g_b = g25_avg[g25_avg["Gender"] == "Boy"]["Obtained Marks"].values
-                        g_g = g25_avg[g25_avg["Gender"] == "Girl"]["Obtained Marks"].values
+                        g_b = g25_avg[g25_avg["Gender"] == "Boy"]["Obtained Marks"].values[0]
+                        g_g = g25_avg[g25_avg["Gender"] == "Girl"]["Obtained Marks"].values[0]
                         gap = abs(g_g - g_b)
                         leader = "Girls" if g_g > g_b else "Boys"
                         st.success(f"**🔍 Gap:** {gap:.2f} pts — **{leader}** outperform on average.")
@@ -657,6 +734,9 @@ if st.session_state["current_page"] == "longitudinal":
                     except Exception:
                         st.write("Insufficient gender data.")
 
+    # ────────────────────────────────────────────────────────────────────────
+    # TAB 4: SUBJECT WISE YoY — Grade-aware (all students, Endline only)
+    # ────────────────────────────────────────────────────────────────────────
     with subj_tab:
         st.markdown("### 📚 Subject & Grade-Wise YoY Comparison (All Students, Endline Only)")
         st.caption(
@@ -665,6 +745,7 @@ if st.session_state["current_page"] == "longitudinal":
         )
         df_sv = df_endlines.copy()
 
+        # ── Filters row ───────────────────────────────────────────────────
         fc1, fc2 = st.columns(2)
         with fc1:
             all_subjects_sv = sorted(df_sv["Subject"].dropna().unique())
@@ -683,12 +764,15 @@ if st.session_state["current_page"] == "longitudinal":
         if sel_subj != "All":
             df_sv = df_sv[df_sv["Subject"] == sel_subj]
 
+        # Canonical grade order (numeric sort)
         all_grades_sv = sorted(df_sv["Grade"].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 99)
 
+        # ── Row 1: Avg endline score by Grade (line) + RISE by Grade (bar) ─
         col_sw1, col_sw2 = st.columns(2)
 
         with col_sw1:
             st.markdown("#### Avg Endline Score by Grade (YoY)")
+            # Each line = one Academic Year; x-axis = Grade
             grade_avg = (
                 df_sv.groupby(["Grade", "Academic Year"])["Obtained Marks"]
                 .mean().reset_index()
@@ -712,7 +796,7 @@ if st.session_state["current_page"] == "longitudinal":
             )
             fig_grade_line.update_xaxes(showgrid=False, linecolor="black")
             fig_grade_line.update_yaxes(showgrid=True, gridcolor="lightgrey", zeroline=False)
-            st.plotly_chart(fig_grade_line, width="stretch")
+            st.plotly_chart(fig_grade_line, use_container_width=True)
 
         with col_sw2:
             st.markdown(f"#### R.I.S.E by Grade — {sel_ay_sv}")
@@ -738,8 +822,9 @@ if st.session_state["current_page"] == "longitudinal":
                     margin=dict(l=0, r=0, t=30),
                     legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5, title=""),
                 )
-                st.plotly_chart(fig_grade_rise, width="stretch")
+                st.plotly_chart(fig_grade_rise, use_container_width=True)
 
+        # ── Row 2: YoY delta by Grade ─────────────────────────────────────
         st.markdown("---")
         st.markdown("#### Grade-Wise YoY Score Change (AY24-25 → AY25-26 Endline)")
         el24_grade = (
@@ -773,13 +858,14 @@ if st.session_state["current_page"] == "longitudinal":
                 plot_bgcolor="rgba(0,0,0,0)", xaxis_title="Grade",
                 yaxis_title="YoY Endline Score Change",
             )
-            st.plotly_chart(fig_yoy_grade, width="stretch")
+            st.plotly_chart(fig_yoy_grade, use_container_width=True)
         else:
             st.info(
                 "Both years' endline data needed for YoY grade comparison. "
                 "If a Subject filter is active for a subject only present in one year, clear it."
             )
 
+        # ── Row 3: Subject-level YoY delta (kept for completeness) ────────
         st.markdown("---")
         st.markdown("#### Subject-Wise YoY Score Change (AY24-25 → AY25-26 Endline)")
         el24s = (
@@ -804,13 +890,16 @@ if st.session_state["current_page"] == "longitudinal":
                 showlegend=False, margin=dict(l=0, r=0, t=30),
                 plot_bgcolor="rgba(0,0,0,0)", xaxis_title="", yaxis_title="YoY Endline Score Change",
             )
-            st.plotly_chart(fig_yoys, width="stretch")
+            st.plotly_chart(fig_yoys, use_container_width=True)
         else:
             st.info(
                 "Both years' endline data needed for YoY subject comparison. "
                 "If the Subject filter is set to a subject only present in one year, clear it."
             )
 
+    # ────────────────────────────────────────────────────────────────────────
+    # TAB 5: GEOGRAPHICAL YoY (Endline only)
+    # ────────────────────────────────────────────────────────────────────────
     with geo_tab:
         st.markdown("### 🗺️ Geographical YoY Comparison (Endline Only)")
         df_geo = df_endlines.copy()
@@ -831,7 +920,7 @@ if st.session_state["current_page"] == "longitudinal":
             )
             fig_sa.update_xaxes(showgrid=False, linecolor="black")
             fig_sa.update_yaxes(showgrid=True, gridcolor="lightgrey", zeroline=False)
-            st.plotly_chart(fig_sa, width="stretch")
+            st.plotly_chart(fig_sa, use_container_width=True)
 
         with col_g2:
             st.markdown("#### State-wise R.I.S.E Shift")
@@ -849,7 +938,7 @@ if st.session_state["current_page"] == "longitudinal":
                 barmode="stack", yaxis_title="% of Students", margin=dict(l=0, r=0, t=30),
                 legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5, title=""),
             )
-            st.plotly_chart(fig_sg, width="stretch")
+            st.plotly_chart(fig_sg, use_container_width=True)
 
         st.markdown("---")
         st.markdown("#### State-wise YoY Score Change")
@@ -869,10 +958,13 @@ if st.session_state["current_page"] == "longitudinal":
                 showlegend=False, margin=dict(l=0, r=0, t=30),
                 plot_bgcolor="rgba(0,0,0,0)", xaxis_title="", yaxis_title="YoY Score Change",
             )
-            st.plotly_chart(fig_yst, width="stretch")
+            st.plotly_chart(fig_yst, use_container_width=True)
         else:
             st.info("Both years' endline data needed for state YoY comparison.")
 
+    # ────────────────────────────────────────────────────────────────────────
+    # TAB 6: CENTRE DEEP DIVE (Endline only)
+    # ────────────────────────────────────────────────────────────────────────
     with centre_tab:
         st.markdown("### 🏫 Centre Deep Dive — YoY (Endline Only)")
         df_cdd = df_endlines.copy()
@@ -900,7 +992,7 @@ if st.session_state["current_page"] == "longitudinal":
                 )
                 fig_ca.update_xaxes(showgrid=False, linecolor="black")
                 fig_ca.update_yaxes(showgrid=True, gridcolor="lightgrey", zeroline=False)
-                st.plotly_chart(fig_ca, width="stretch")
+                st.plotly_chart(fig_ca, use_container_width=True)
 
             with col_c2:
                 st.markdown("#### R.I.S.E Distribution by Year")
@@ -916,7 +1008,7 @@ if st.session_state["current_page"] == "longitudinal":
                     barmode="stack", yaxis_title="% of Students", margin=dict(l=0, r=0, t=30),
                     legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5, title=""),
                 )
-                st.plotly_chart(fig_cc, width="stretch")
+                st.plotly_chart(fig_cc, use_container_width=True)
 
             st.markdown("---")
             st.markdown("#### Centre vs All Centres Benchmark")
@@ -940,7 +1032,7 @@ if st.session_state["current_page"] == "longitudinal":
                     xaxis_title="", yaxis_title="Avg Endline Score", margin=dict(l=0, r=0, t=30),
                     legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5, title=""),
                 )
-                st.plotly_chart(fig_bench, width="stretch")
+                st.plotly_chart(fig_bench, use_container_width=True)
 
             st.markdown("---")
             st.markdown("#### Gender Breakdown (AY 25-26 Endline)")
@@ -956,10 +1048,15 @@ if st.session_state["current_page"] == "longitudinal":
                     xaxis_title="", yaxis_title="Avg Score",
                     plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30), showlegend=False,
                 )
-                st.plotly_chart(fig_gen_c, width="stretch")
+                st.plotly_chart(fig_gen_c, use_container_width=True)
             else:
                 st.info("No gender data for this centre in AY 25-26.")
 
+    # ────────────────────────────────────────────────────────────────────────
+    # TAB 7: STUDENT LOOKUP
+    # Searches the FULL df_long (ignoring sidebar filters) so a student is
+    # never hidden by an active filter.
+    # ────────────────────────────────────────────────────────────────────────
     with student_tab:
         st.markdown("### 🔍 Student Lookup — Individual YoY Profile")
         st.markdown(
@@ -968,14 +1065,14 @@ if st.session_state["current_page"] == "longitudinal":
         )
         st.caption("ℹ️ Search runs against the **full dataset** — sidebar filters are ignored here.")
 
-        s_col, b_col = st.columns()
+        s_col, b_col = st.columns([3, 1])
         with s_col:
             raw_input = st.text_input(
                 "Student ID", placeholder="e.g. 428115", key="student_search_input"
             ).strip()
         with b_col:
             st.write("")
-            st.button("🔍 Search", width="stretch", key="student_search_btn")
+            st.button("🔍 Search", use_container_width=True, key="student_search_btn")
 
         with st.expander("Or pick a student from the current filtered view", expanded=False):
             ids_in_filter = [""] + sorted(filtered_df_long["Student ID"].dropna().unique())
@@ -999,7 +1096,7 @@ if st.session_state["current_page"] == "longitudinal":
         if len(candidates) > 1 and search_input not in candidates:
             exact_id = st.selectbox("Multiple matches — select exact ID:", sorted(candidates), key="exact_id_pick")
         else:
-            exact_id = search_input if search_input in candidates else candidates
+            exact_id = search_input if search_input in candidates else candidates[0]
 
         student_df = df_long[df_long["Student ID"] == exact_id].copy()
 
@@ -1007,11 +1104,12 @@ if st.session_state["current_page"] == "longitudinal":
             st.error("No data found for this Student ID.")
             st.stop()
 
+        # ── Profile header ──────────────────────────────────────────────
         st.markdown("---")
-        meta = student_df.sort_values("Timepoint").iloc
+        meta = student_df.sort_values("Timepoint").iloc[0]
         grade_by_year = student_df.groupby("Academic Year")["Grade"].first().to_dict()
         gender_val = student_df[~student_df["Gender"].isin([NO_GENDER, "nan", "none", "null"])]["Gender"].mode()
-        gender_display = gender_val.iloc if not gender_val.empty else "Not recorded (AY 24-25 only)"
+        gender_display = gender_val.iloc[0] if not gender_val.empty else "Not recorded (AY 24-25 only)"
 
         st.markdown(
             f"""
@@ -1030,6 +1128,7 @@ if st.session_state["current_page"] == "longitudinal":
             unsafe_allow_html=True,
         )
 
+        # ── KPI row ────────────────────────────────────────────────────
         el24_s = student_df[(student_df["Academic Year"] == "AY24-25") & (student_df["Period"] == "Endline")]
         el25_s = student_df[(student_df["Academic Year"] == "AY25-26") & (student_df["Period"] == "Endline")]
 
@@ -1051,6 +1150,7 @@ if st.session_state["current_page"] == "longitudinal":
         else:
             k4.metric("YoY Status", "No shared subjects across both years")
 
+        # ── Full assessment table ───────────────────────────────────────
         st.markdown("---")
         st.markdown("#### 📋 Full Assessment Record")
         tbl = student_df[
@@ -1065,11 +1165,13 @@ if st.session_state["current_page"] == "longitudinal":
                 "Evolving":   "background-color:#ed1c2d;color:white",
             }.get(val, "")
 
+        # BUG FIX: pandas >= 2.1 removed applymap; use map() instead
         st.dataframe(
             tbl.style.map(highlight_cat, subset=["Category"]),
             use_container_width=True, hide_index=True,
         )
 
+        # ── Per-subject score bar charts ────────────────────────────────
         st.markdown("---")
         st.markdown("#### 📊 Score Journey by Subject")
 
@@ -1115,14 +1217,16 @@ if st.session_state["current_page"] == "longitudinal":
                     margin=dict(l=0, r=0, t=50, b=10),
                     height=300,
                 )
-                st.plotly_chart(fig_stu, width="stretch")
+                st.plotly_chart(fig_stu, use_container_width=True)
 
+            # ── Category tier journey ─────────────────────────────────
             st.markdown("---")
             st.markdown("#### 🔄 R.I.S.E Tier Journey (All Subjects)")
             mig = student_df.groupby(["Timepoint", "Subject"], observed=True)["Category"].first().reset_index()
             mig = mig.sort_values("Timepoint")
             cat_num = {"Reviving": 1, "Initiating": 2, "Shaping": 3, "Evolving": 4}
             mig["Tier"] = mig["Category"].map(cat_num)
+            # Cast Timepoint back to string for Plotly
             mig["Timepoint"] = mig["Timepoint"].astype(str)
 
             fig_mig = px.line(
@@ -1133,22 +1237,16 @@ if st.session_state["current_page"] == "longitudinal":
                 category_orders={"Timepoint": TP_ORDER},
             )
             fig_mig.update_traces(marker=dict(size=13), line=dict(width=2))
-            
-            # FLAT Y-AXIS UPDATE TO PREVENT DICT SYNTAX ERRORS
-            fig_mig.update_yaxes(
-                tickvals=,
-                ticktext=["🔴 Reviving", "🔵 Initiating", "🟢 Shaping", "🔴 Evolving"],
-                range=[0.5, 4.5], 
-                showgrid=True, 
-                gridcolor="#eee"
-            )
-            fig_mig.update_xaxes(showgrid=False, linecolor="black")
             fig_mig.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)", 
-                margin=dict(l=0, r=0, t=30),
+                yaxis=dict(
+                    tickvals=[1, 2, 3, 4],
+                    ticktext=["🔴 Reviving", "🔵 Initiating", "🟢 Shaping", "🔴 Evolving"],
+                    range=[0.5, 4.5], showgrid=True, gridcolor="#eee",
+                ),
+                plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30),
+                xaxis=dict(showgrid=False, linecolor="black"),
                 height=320,
             )
-            
             for lvl, clr in [
                 (1, "rgba(242,124,72,0.07)"),
                 (2, "rgba(0,148,201,0.07)"),
@@ -1156,8 +1254,9 @@ if st.session_state["current_page"] == "longitudinal":
                 (4, "rgba(237,28,45,0.07)"),
             ]:
                 fig_mig.add_hrect(y0=lvl-0.45, y1=lvl+0.45, fillcolor=clr, line_width=0)
-            st.plotly_chart(fig_mig, width="stretch")
+            st.plotly_chart(fig_mig, use_container_width=True)
 
+            # Improved / declined callout
             if not el24_s.empty and not el25_s.empty and shared_subs:
                 improved, declined = [], []
                 for sub in shared_subs:
@@ -1177,12 +1276,18 @@ if st.session_state["current_page"] == "longitudinal":
 # ==========================================
 DATA_FILE = "BL-EL-AY-25-26-Final-AllSubjects.xlsx"
 
+# Required columns every uploaded file must contain.
+REQUIRED_COLS = {"State", "Centre Name", "Donor", "Subject", "Grade", "Student ID", "Obtained Marks"}
+VALID_CATEGORIES = {"Reviving", "Initiating", "Shaping", "Evolving"}
+VALID_PERIODS    = {"Baseline", "Endline"}
+
 st.title("📈 Impact Analytics Dashboard")
 st.markdown(
     "<p style='color:gray;font-size:1.1em;'>Comprehensive Baseline vs. Endline Performance Assessment</p>",
     unsafe_allow_html=True,
 )
 
+# ── Sidebar: nav + data management ───────────────────────────────────────────
 with st.sidebar:
     try:
         st.image("evidyaloka_logo.png", width=273)
@@ -1191,16 +1296,55 @@ with st.sidebar:
     st.success(f"👤 **{st.session_state['user_first_name']}**")
     nc1, nc2 = st.columns(2)
     with nc1:
-        if st.button("🏠 Home", width="stretch", key="nav_home_main"):
+        if st.button("🏠 Home", use_container_width=True, key="nav_home_main"):
             st.session_state["current_page"] = "home"; st.rerun()
     with nc2:
-        if st.button("Sign Out", width="stretch", key="signout_main"):
+        if st.button("Sign Out", use_container_width=True, key="signout_main"):
             st.session_state.update({"logged_in_email": None, "user_first_name": "User", "current_page": "home"})
             st.rerun()
     st.markdown("---")
 
+    # ── Data Management panel ─────────────────────────────────────────────────
+    st.markdown("### 📂 Data Management")
+    base_loaded = os.path.exists(DATA_FILE)
+    if base_loaded:
+        st.success(f"✅ Base file loaded  \n`{DATA_FILE}`")
+    else:
+        st.warning(f"⚠️ Base file not found  \n`{DATA_FILE}`")
+
+    st.markdown("**Append new data**")
+    st.caption(
+        "Upload a CSV or Excel whose columns match the base file. "
+        "Rows are validated, deduplicated, and merged instantly."
+    )
+    appended_file = st.file_uploader(
+        "Upload CSV or Excel to append",
+        type=["csv", "xlsx", "xls"],
+        key="main_append_upload",
+        help=(
+            "Required columns: State, Centre Name, Donor, Subject, Grade, "
+            "Student ID, Obtained Marks.\n\n"
+            "Optional: Gender, Total Marks, Category (Rubrics), "
+            "Academic Year (Baseline / Endline)."
+        ),
+    )
+    if st.session_state.get("appended_df") is not None:
+        append_rows = len(st.session_state["appended_df"])
+        st.info(f"➕ **{append_rows:,} appended rows** active")
+        if st.button("🗑️ Clear appended data", use_container_width=True, key="clear_append"):
+            st.session_state.pop("appended_df", None)
+            st.session_state.pop("append_log", None)
+            st.session_state.pop("_last_upload_sig", None)
+            st.session_state.pop("needs_period_choice", None)
+            st.rerun()
+    st.markdown("---")
+
+
+# ── Core loading + cleaning functions ────────────────────────────────────────
+
 @st.cache_data(show_spinner=False)
 def load_and_prep_data(file_source):
+    """Load and clean the base two-sheet Excel workbook."""
     common_cols = [
         "State", "Centre Name", "Donor", "Subject", "Grade", "Student ID",
         "Gender", "Total Marks", "Obtained Marks", "Category", "Academic Year",
@@ -1222,7 +1366,11 @@ def load_and_prep_data(file_source):
         return pd.DataFrame()
     if not dfs:
         return pd.DataFrame()
-    df = pd.concat(dfs, ignore_index=True)
+    return _clean_main_df(pd.concat(dfs, ignore_index=True))
+
+
+def _clean_main_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Shared cleaning pipeline used for both base and appended data."""
     for col in ["State", "Centre Name", "Donor", "Subject", "Student ID", "Gender", "Category"]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
@@ -1235,74 +1383,221 @@ def load_and_prep_data(file_source):
     df["Obtained Marks"] = pd.to_numeric(df["Obtained Marks"], errors="coerce")
     return df
 
-data_source = None
-if os.path.exists(DATA_FILE):
-    data_source = DATA_FILE
-else:
-    st.warning(f"`{DATA_FILE}` not found. Upload it below.")
-    up_main = st.file_uploader(f"Upload {DATA_FILE}", type=["xlsx"], key="up_main")
-    if up_main:
-        data_source = up_main
 
-if data_source is None:
-    st.info("Please upload the data file to load the dashboard.")
+def _auto_assign_rise(obtained: pd.Series, total: pd.Series) -> pd.Series:
+    """Assign RISE category from score percentage when Category column is absent or invalid."""
+    pct = obtained / total.replace(0, pd.NA) * 100
+    return pd.cut(
+        pct.fillna(0),
+        bins=[-1, 25, 50, 75, 101],
+        labels=["Reviving", "Initiating", "Shaping", "Evolving"],
+    ).astype(str)
+
+
+def _parse_upload(uploaded_file) -> tuple:
+    """
+    Parse a user-uploaded CSV or Excel into a clean DataFrame.
+
+    Returns (df, log_messages).
+
+    Accepts three formats:
+      1. Two-sheet Excel  — sheet 0 = Baseline, sheet 1 = Endline (same as base file)
+      2. Single-sheet / CSV with Academic Year or Assessment Type column
+      3. Single-sheet / CSV with no period column — rows labelled from session_state
+    """
+    log   = []
+    fname = uploaded_file.name.lower()
+
+    # ── Read file ─────────────────────────────────────────────────────────────
+    try:
+        if fname.endswith(".csv"):
+            raw    = pd.read_csv(uploaded_file)
+            sheets = None
+        else:
+            xls    = pd.ExcelFile(uploaded_file)
+            sheets = xls.sheet_names
+            if len(sheets) >= 2:
+                dfs = []
+                for sheet, label in [(sheets[0], "Baseline"), (sheets[1], "Endline")]:
+                    d = pd.read_excel(uploaded_file, sheet_name=sheet)
+                    if "Rubrics" in d.columns and "Category" not in d.columns:
+                        d.rename(columns={"Rubrics": "Category"}, inplace=True)
+                    d["Academic Year"] = label
+                    dfs.append(d)
+                raw = pd.concat(dfs, ignore_index=True)
+                log.append(
+                    f"📄 Two-sheet Excel — **{sheets[0]}** → Baseline, **{sheets[1]}** → Endline."
+                )
+            else:
+                raw = pd.read_excel(uploaded_file, sheet_name=0)
+    except Exception as e:
+        return pd.DataFrame(), [f"❌ Could not read file: {e}"]
+
+    raw.columns = raw.columns.str.strip()
+    if "Rubrics" in raw.columns and "Category" not in raw.columns:
+        raw.rename(columns={"Rubrics": "Category"}, inplace=True)
+
+    # ── Required columns ──────────────────────────────────────────────────────
+    missing = REQUIRED_COLS - set(raw.columns)
+    if missing:
+        return pd.DataFrame(), [
+            f"❌ Missing required columns: **{', '.join(sorted(missing))}**.  \n"
+            f"Columns in your file: `{', '.join(raw.columns)}`"
+        ]
+
+    # ── Resolve Academic Year ─────────────────────────────────────────────────
+    if "Academic Year" not in raw.columns:
+        if "Assessment Type" in raw.columns:
+            raw["Academic Year"] = raw["Assessment Type"].astype(str).str.strip().str.title()
+            log.append("ℹ️ Used **Assessment Type** column as Academic Year.")
+        else:
+            chosen = st.session_state.get("upload_period_choice", "Baseline")
+            raw["Academic Year"] = chosen
+            log.append(f"ℹ️ No period column found — all rows labelled **{chosen}**.")
+
+    raw["Academic Year"] = raw["Academic Year"].astype(str).str.strip().str.title()
+    bad_period = ~raw["Academic Year"].isin(VALID_PERIODS)
+    if bad_period.any():
+        bad_vals = raw.loc[bad_period, "Academic Year"].unique()[:5]
+        log.append(f"⚠️ {bad_period.sum():,} rows had invalid period values (`{'`, `'.join(bad_vals)}`) — dropped.")
+        raw = raw[~bad_period]
+
+    # ── Numeric validation ────────────────────────────────────────────────────
+    raw["Obtained Marks"] = pd.to_numeric(raw["Obtained Marks"], errors="coerce")
+    null_marks = raw["Obtained Marks"].isna().sum()
+    if null_marks:
+        log.append(f"⚠️ {null_marks:,} rows had non-numeric Obtained Marks — dropped.")
+        raw = raw.dropna(subset=["Obtained Marks"])
+
+    if raw.empty:
+        return pd.DataFrame(), log + ["❌ No valid rows remain after cleaning."]
+
+    # ── Category validation / auto-assign ─────────────────────────────────────
+    total_col = pd.to_numeric(raw.get("Total Marks", 10), errors="coerce").fillna(10)
+    if "Category" in raw.columns:
+        raw["Category"] = raw["Category"].astype(str).str.strip().str.title()
+        bad_cat = ~raw["Category"].isin(VALID_CATEGORIES)
+        if bad_cat.any():
+            log.append(f"⚠️ {bad_cat.sum():,} rows had invalid Category — auto-assigned from score.")
+            raw.loc[bad_cat, "Category"] = _auto_assign_rise(
+                raw.loc[bad_cat, "Obtained Marks"], total_col[bad_cat]
+            )
+    else:
+        raw["Category"] = _auto_assign_rise(raw["Obtained Marks"], total_col)
+        log.append("ℹ️ No Category column — RISE tier auto-assigned from score %.")
+
+    # ── Deduplication ─────────────────────────────────────────────────────────
+    before = len(raw)
+    raw = raw.drop_duplicates(subset=["Student ID", "Subject", "Academic Year"], keep="first")
+    dupes = before - len(raw)
+    if dupes:
+        log.append(f"ℹ️ {dupes:,} duplicate rows removed (Student ID + Subject + Period).")
+
+    # ── Keep dashboard columns only ───────────────────────────────────────────
+    keep = ["State", "Centre Name", "Donor", "Subject", "Grade", "Student ID",
+            "Gender", "Total Marks", "Obtained Marks", "Category", "Academic Year"]
+    raw = raw[[c for c in keep if c in raw.columns]]
+    for col, default in [("Gender", "Unknown"), ("Total Marks", 10)]:
+        if col not in raw.columns:
+            raw[col] = default
+
+    log.append(f"✅ **{len(raw):,} valid rows** ready to append.")
+    return _clean_main_df(raw), log
+
+
+# ── Load base data ────────────────────────────────────────────────────────────
+if not os.path.exists(DATA_FILE):
+    st.error(f"⚠️ Base data file `{DATA_FILE}` not found. Place it alongside `app.py`.")
     st.stop()
 
 with st.spinner("Loading base data…"):
-    base_df_loaded = load_and_prep_data(data_source)
+    df_base = load_and_prep_data(DATA_FILE)
 
-if base_df_loaded.empty:
-    st.error("Base data loaded but is empty.")
+if df_base.empty:
+    st.error("Base data is empty. Check the file.")
     st.stop()
 
-if "master_df" not in st.session_state:
-    st.session_state["master_df"] = base_df_loaded.copy()
+# ── Process new upload (only when a new file is dropped) ─────────────────────
+if appended_file is not None:
+    upload_sig = f"{appended_file.name}_{appended_file.size}"
+    if st.session_state.get("_last_upload_sig") != upload_sig:
+        st.session_state["_last_upload_sig"] = upload_sig
 
-if "appended_files" not in st.session_state:
-    st.session_state["appended_files"] = set()
+        # Detect whether a period selector is needed before parsing
+        needs_choice = False
+        try:
+            fname_lower = appended_file.name.lower()
+            if fname_lower.endswith(".csv"):
+                probe = pd.read_csv(io.BytesIO(appended_file.read()))
+                appended_file.seek(0)
+                needs_choice = ("Academic Year" not in probe.columns and
+                                "Assessment Type" not in probe.columns)
+            else:
+                probe_xls = pd.ExcelFile(io.BytesIO(appended_file.read()))
+                appended_file.seek(0)
+                if len(probe_xls.sheet_names) < 2:
+                    probe = pd.read_excel(io.BytesIO(appended_file.read()), nrows=1)
+                    appended_file.seek(0)
+                    needs_choice = ("Academic Year" not in probe.columns and
+                                    "Assessment Type" not in probe.columns)
+        except Exception:
+            pass
 
-with st.sidebar:
-    st.markdown("---")
-    st.markdown("### ➕ Append New Data")
-    st.caption("Upload a CSV or Excel file to add to the current dataset.")
-    
-    append_file = st.file_uploader(
-        "Select file to append", 
-        type=["csv", "xlsx"], 
-        key="append_uploader",
-        label_visibility="collapsed"
+        st.session_state["needs_period_choice"] = needs_choice
+        if needs_choice and "upload_period_choice" not in st.session_state:
+            st.session_state["upload_period_choice"] = "Baseline"
+
+        parsed_df, parse_log = _parse_upload(appended_file)
+        st.session_state["append_log"]  = parse_log
+        st.session_state["appended_df"] = parsed_df if not parsed_df.empty else None
+
+# ── Period selector (shown inline when file has no period label) ──────────────
+if st.session_state.get("needs_period_choice") and appended_file is not None:
+    st.info(
+        "Your file has no **Academic Year** or **Assessment Type** column. "
+        "Select which period to assign to all uploaded rows:"
     )
+    chosen_period = st.radio(
+        "Assign uploaded rows to:",
+        options=["Baseline", "Endline"],
+        index=0 if st.session_state.get("upload_period_choice", "Baseline") == "Baseline" else 1,
+        horizontal=True,
+        key="upload_period_radio",
+    )
+    if chosen_period != st.session_state.get("upload_period_choice"):
+        st.session_state["upload_period_choice"] = chosen_period
+        appended_file.seek(0)
+        parsed_df, parse_log = _parse_upload(appended_file)
+        st.session_state["append_log"]  = parse_log
+        st.session_state["appended_df"] = parsed_df if not parsed_df.empty else None
+        st.rerun()
 
-    if append_file is not None:
-        if append_file.name not in st.session_state["appended_files"]:
-            with st.spinner("Appending new data..."):
-                try:
-                    if append_file.name.endswith('.csv'):
-                        new_data = pd.read_csv(append_file)
-                    else:
-                        new_data = pd.read_excel(append_file)
-                    
-                    new_data["Source_File"] = "Appended" 
-                    
-                    st.session_state["master_df"] = pd.concat(
-                        [st.session_state["master_df"], new_data], 
-                        ignore_index=True
-                    )
-                    
-                    st.session_state["appended_files"].add(append_file.name)
-                    st.success(f"Successfully appended {len(new_data)} rows!")
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Error appending file: {e}")
+# ── Validation log ────────────────────────────────────────────────────────────
+if st.session_state.get("append_log"):
+    with st.expander("📋 Upload validation log", expanded=True):
+        for msg in st.session_state["append_log"]:
+            if msg.startswith("❌"):   st.error(msg)
+            elif msg.startswith("⚠️"): st.warning(msg)
+            elif msg.startswith("✅"): st.success(msg)
+            else:                      st.info(msg)
 
-    if len(st.session_state["appended_files"]) > 0:
-        if st.button("🗑️ Clear Appended Data", width="stretch"):
-            st.session_state["master_df"] = base_df_loaded.copy()
-            st.session_state["appended_files"].clear()
-            st.rerun()
+# ── Merge base + appended ─────────────────────────────────────────────────────
+appended_df = st.session_state.get("appended_df")
+if appended_df is not None and not appended_df.empty:
+    df = pd.concat([df_base, appended_df], ignore_index=True)
+    df = df.drop_duplicates(subset=["Student ID", "Subject", "Academic Year"], keep="first")
+    df["Category"] = pd.Categorical(df["Category"], categories=RISE_ORDER, ordered=True)
+    st.success(
+        f"✅ Dashboard showing base + **{len(appended_df):,} appended rows** "
+        f"({len(df):,} total after deduplication). "
+        f"Use **Clear appended data** in the sidebar to revert."
+    )
+else:
+    df = df_base.copy()
 
-df = st.session_state["master_df"]
+if df.empty:
+    st.error("No data available.")
+    st.stop()
 
 with st.sidebar:
     filtered_df, main_sel = build_filter_sidebar(df, key_prefix="main")
@@ -1363,7 +1658,7 @@ with tab1:
         fig_box = px.box(filtered_df, x="Academic Year", y="Obtained Marks",
                          color="Academic Year", color_discrete_map=COLOR_MAP, points="all")
         fig_box.update_layout(showlegend=False, margin=dict(l=0,r=0,t=30))
-        st.plotly_chart(fig_box, width="stretch")
+        st.plotly_chart(fig_box, use_container_width=True)
     with cb:
         st.markdown("#### 🧬 R.I.S.E Category Shift")
         cc = filtered_df.groupby(["Academic Year","Category"]).size().reset_index(name="Count")
@@ -1373,7 +1668,7 @@ with tab1:
                           color_discrete_map=COLOR_MAP, category_orders={"Category": RISE_ORDER})
         fig_rise.update_layout(barmode="group", margin=dict(l=0,r=0,t=30),
                                 legend=dict(orientation="h",yanchor="top",y=-0.15,xanchor="center",x=0.5,title=""))
-        st.plotly_chart(fig_rise, width="stretch")
+        st.plotly_chart(fig_rise, use_container_width=True)
 
 # ── TAB 2: SUBJECT DEEP-DIVE ─────────────────────────────────
 with tab2:
@@ -1397,7 +1692,7 @@ with tab2:
                                category_orders={"Category": RISE_ORDER})
                 fig_g.update_layout(barmode="stack", yaxis_title="% of Students", margin=dict(l=0,r=0,t=30),
                                     legend=dict(orientation="h",yanchor="top",y=-0.15,xanchor="center",x=0.5,title=""))
-                st.plotly_chart(fig_g, width="stretch")
+                st.plotly_chart(fig_g, use_container_width=True)
             else:
                 st.info(f"No {lbl} data.")
 
@@ -1440,7 +1735,7 @@ with tab3:
                              legend=dict(orientation="h",yanchor="top",y=-0.2,xanchor="center",x=0.5,title=""))
         fig_st.update_xaxes(title_text="")
         fig_st.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-        st.plotly_chart(fig_st, width="stretch")
+        st.plotly_chart(fig_st, use_container_width=True)
 
     st.markdown("---"); st.markdown("#### Top 10 Centres (by % Evolving)")
     if not filtered_df.empty:
@@ -1457,7 +1752,7 @@ with tab3:
                         category_orders={"Category":RISE_ORDER})
         fig_tc.update_layout(barmode="stack",xaxis_title="% of Students",yaxis_title="",margin=dict(l=0,r=0,t=30),
                              legend=dict(orientation="h",yanchor="top",y=-0.15,xanchor="center",x=0.5,title=""))
-        st.plotly_chart(fig_tc, width="stretch")
+        st.plotly_chart(fig_tc, use_container_width=True)
 
 # ── TAB 4: STUDENT-LEVEL IMPACT ──────────────────────────────
 with tab4:
@@ -1491,7 +1786,7 @@ with tab4:
             fig_heat.update_coloraxes(showscale=False)
             fig_heat.update_layout(margin=dict(l=0,r=0,t=30,b=0),height=500)
             _, hc, _ = st.columns(3)
-            with hc: st.plotly_chart(fig_heat, width="stretch")
+            with hc: st.plotly_chart(fig_heat, use_container_width=True)
         else:
             st.warning("No matched Student ID + Subject pairs between BL and EL.")
     else:
@@ -1522,7 +1817,7 @@ with tab5:
                                 barmode="group",color_discrete_map=COLOR_MAP,text_auto=".2f")
                 fig_ga.update_layout(yaxis_title="Avg Marks",margin=dict(l=0,r=0,t=30),
                                      legend=dict(orientation="h",yanchor="top",y=-0.15,xanchor="center",x=0.5,title=""))
-                st.plotly_chart(fig_ga,width="stretch")
+                st.plotly_chart(fig_ga,use_container_width=True)
             with gc2:
                 gc_d = gdf.groupby(["Gender","Academic Year","Category"]).size().reset_index(name="Count")
                 gc_d["Pct"] = gc_d.groupby(["Gender","Academic Year"])["Count"].transform(lambda x: x/x.sum()*100)
@@ -1534,7 +1829,7 @@ with tab5:
                                      legend=dict(orientation="h",yanchor="top",y=-0.2,xanchor="center",x=0.5,title=""))
                 fig_gc.update_xaxes(title_text="")
                 fig_gc.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-                st.plotly_chart(fig_gc,width="stretch")
+                st.plotly_chart(fig_gc,use_container_width=True)
         else:
             st.info("No valid gender data in current selection.")
     else:
@@ -1576,7 +1871,7 @@ with tab6:
             fig_rtm.add_hline(y=0,line_dash="dash",line_color="black",
                               annotation_text="No Change",annotation_position="bottom right")
             fig_rtm.update_layout(margin=dict(l=0,r=0,t=30))
-            st.plotly_chart(fig_rtm,width="stretch")
+            st.plotly_chart(fig_rtm,use_container_width=True)
             try:
                 rtm["Quintile"]=pd.qcut(rtm["Obtained Marks_BL"],q=5,duplicates="drop")
                 bstats=rtm.groupby("Quintile",observed=False).agg(
@@ -1594,7 +1889,7 @@ with tab6:
                 fig_bin.add_hline(y=0,line_dash="solid",line_color="black",line_width=1)
                 fig_bin.update_traces(textposition="outside")
                 fig_bin.update_layout(margin=dict(l=0,r=0,t=30,b=40),coloraxis_showscale=False)
-                st.plotly_chart(fig_bin,width="stretch")
+                st.plotly_chart(fig_bin,use_container_width=True)
             except ValueError:
                 st.info("Not enough variance for quintile bins.")
             r2_val=corr**2 if not pd.isna(corr) else 0
@@ -1619,7 +1914,7 @@ with st.sidebar:
         if st.session_state.get("ready_ppt_donor") != selected_donors:
             st.session_state.pop("ready_ppt", None); st.session_state.pop("ready_ppt_donor", None)
 
-        if st.button(f"⚙️ Prepare PPTX for {selected_donors}", width="stretch"):
+        if st.button(f"⚙️ Prepare PPTX for {selected_donors}", use_container_width=True):
             with st.spinner("Generating presentation…"):
                 try:
                     from pptx import Presentation
@@ -1634,17 +1929,17 @@ with st.sidebar:
                         buf.seek(0); return buf
 
                     def add_slide(fig, title):
-                        sl = prs.slides.add_slide(prs.slide_layouts)
+                        sl = prs.slides.add_slide(prs.slide_layouts[5])
                         sl.shapes.title.text = title
                         sl.shapes.add_picture(fig_to_png(fig), Inches(0.5), Inches(1.5), width=Inches(9))
 
-                    sl1 = prs.slides.add_slide(prs.slide_layouts)
+                    sl1 = prs.slides.add_slide(prs.slide_layouts[0])
                     sl1.shapes.title.text = "AY 25-26 Impact Report"
-                    sl1.placeholders.text = f"Donor: {selected_donors}"
+                    sl1.placeholders[1].text = f"Donor: {selected_donors}"
 
-                    sl2 = prs.slides.add_slide(prs.slide_layouts)
+                    sl2 = prs.slides.add_slide(prs.slide_layouts[1])
                     sl2.shapes.title.text = "Executive Summary"
-                    tf = sl2.placeholders.text_frame; tf.word_wrap = True
+                    tf = sl2.placeholders[1].text_frame; tf.word_wrap = True
                     tf.text = f"Centres: {filtered_df['Centre Name'].nunique()}"
                     tf.add_paragraph().text = f"States: {', '.join(str(s) for s in sorted(filtered_df['State'].dropna().unique()))}"
                     tf.add_paragraph().text = f"Subjects: {', '.join(sorted(filtered_df['Subject'].dropna().unique()))}"
