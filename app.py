@@ -244,7 +244,7 @@ if st.session_state["current_page"] == "home":
         unsafe_allow_html=True,
     )
     st.markdown("---")
-    col1, col2, *_ = st.columns(4)
+    col1, col2, col3, *_ = st.columns(4)
     with col1:
         st.markdown("<h1 style='text-align:center;font-size:4rem;'>📈</h1>", unsafe_allow_html=True)
         if st.button("Impact Analytics Dashboard", use_container_width=True):
@@ -253,6 +253,46 @@ if st.session_state["current_page"] == "home":
         st.markdown("<h1 style='text-align:center;font-size:4rem;'>🏛️</h1>", unsafe_allow_html=True)
         if st.button("Longitudinal Analysis", use_container_width=True):
             st.session_state["current_page"] = "longitudinal"; st.rerun()
+    with col3:
+        st.markdown("<h1 style='text-align:center;font-size:4rem;'>🏢</h1>", unsafe_allow_html=True)
+        if st.button("Operations & Impact Command Center", use_container_width=True):
+            st.session_state["current_page"] = "ops"; st.rerun()
+    st.stop()
+
+
+# ==========================================
+# OPS DASHBOARD MODULE
+# ==========================================
+if st.session_state["current_page"] == "ops":
+    # Sidebar nav (mirrors the other modules)
+    with st.sidebar:
+        try:
+            st.image("evidyaloka_logo.png", width=273)
+        except Exception:
+            pass
+        st.success(f"👤 **{st.session_state['user_first_name']}**")
+        nc1, nc2 = st.columns(2)
+        with nc1:
+            if st.button("🏠 Home", use_container_width=True, key="nav_home_ops"):
+                st.session_state["current_page"] = "home"; st.rerun()
+        with nc2:
+            if st.button("Sign Out", use_container_width=True, key="signout_ops"):
+                st.session_state.update({
+                    "logged_in_email": None,
+                    "user_first_name": "User",
+                    "current_page": "home",
+                })
+                st.rerun()
+
+    # Import and render — ops_dashboard.py must sit alongside app.py
+    try:
+        from ops_dashboard import render_ops_dashboard
+        render_ops_dashboard()
+    except ImportError:
+        st.error(
+            "⚠️ `ops_dashboard.py` not found. "
+            "Place it in the same folder as `app.py` and restart the app."
+        )
     st.stop()
 
 
