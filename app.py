@@ -300,7 +300,7 @@ if st.session_state["current_page"] == "ops":
 # DATA LOADING — LONGITUDINAL MODULE
 # ==========================================
 FILE_24 = "EL-BL-Data-AY-24-25.xlsx"
-FILE_25 = "BL-EL-AY-25-26-Final-AllSubjects.xlsx"
+FILE_25 = "AltenUP-WB-BL-EL-Data-AY25-26.xlsx"
 
 
 @st.cache_data(show_spinner=False)
@@ -1274,7 +1274,7 @@ if st.session_state["current_page"] == "longitudinal":
 # ==========================================
 # MAIN DASHBOARD  (AY 25-26 BL vs EL)
 # ==========================================
-DATA_FILE = "BL-EL-AY-25-26-Final-AllSubjects.xlsx"
+DATA_FILE = "AltenUP-WB-BL-EL-Data-AY25-26.xlsx"
 
 # Required columns every uploaded file must contain.
 REQUIRED_COLS = {"State", "Centre Name", "Donor", "Subject", "Grade", "Student ID", "Obtained Marks"}
