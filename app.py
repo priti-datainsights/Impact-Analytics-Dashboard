@@ -1274,7 +1274,8 @@ if st.session_state["current_page"] == "longitudinal":
 # ==========================================
 # MAIN DASHBOARD  (AY 25-26 BL vs EL)
 # ==========================================
-DATA_FILE = "AltenUP-WB-BL-EL-Data-AY25-26.xlsx"
+# Default fallback — used only if no file has been selected yet.
+DATA_FILE_DEFAULT = "AltenUP-WB-BL-EL-Data-AY25-26.xlsx"
 
 # Required columns every uploaded file must contain.
 REQUIRED_COLS = {"State", "Centre Name", "Donor", "Subject", "Grade", "Student ID", "Obtained Marks"}
@@ -1306,15 +1307,79 @@ with st.sidebar:
 
     # ── Data Management panel ─────────────────────────────────────────────────
     st.markdown("### 📂 Data Management")
-    base_loaded = os.path.exists(DATA_FILE)
-    if base_loaded:
-        st.success(f"✅ Base file loaded  \n`{DATA_FILE}`")
-    else:
-        st.warning(f"⚠️ Base file not found  \n`{DATA_FILE}`")
 
-    st.markdown("**Append new data**")
+    # Auto-detect all Excel and CSV files in the same directory as app.py.
+    # We look in the script's own directory so detection works identically
+    # on local machines, Streamlit Cloud, and Docker deployments.
+    _app_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else os.getcwd()
+
+    def _scan_data_files(directory: str) -> list:
+        """
+        Walk the repo root (non-recursive) and return a sorted list of
+        all .xlsx / .xls / .csv filenames found there.
+        Excludes hidden files and anything inside __pycache__ / .git dirs.
+        """
+        found = []
+        for fname in sorted(os.listdir(directory)):
+            if fname.startswith(".") or fname.startswith("~"):
+                continue
+            if fname.lower().endswith((".xlsx", ".xls", ".csv")):
+                found.append(fname)
+        return found
+
+    available_files = _scan_data_files(_app_dir)
+
+    # ── File selector ──────────────────────────────────────────────────────
+    st.markdown("**Select dashboard data source**")
+
+    if not available_files:
+        st.error("⚠️ No Excel or CSV files found in the app directory.")
+        selected_data_file = DATA_FILE_DEFAULT
+    else:
+        # Pre-select: honour session_state choice, else fall back to default
+        default_idx = 0
+        if st.session_state.get("selected_data_file") in available_files:
+            default_idx = available_files.index(st.session_state["selected_data_file"])
+        elif DATA_FILE_DEFAULT in available_files:
+            default_idx = available_files.index(DATA_FILE_DEFAULT)
+
+        selected_data_file = st.selectbox(
+            "Choose file",
+            options=available_files,
+            index=default_idx,
+            key="data_file_selectbox",
+            help=(
+                "All Excel (.xlsx/.xls) and CSV files detected in the app folder "
+                "are listed here. Select one to reload the dashboard with that file."
+            ),
+        )
+
+        # Detect change → clear cache and appended data so everything refreshes
+        if st.session_state.get("selected_data_file") != selected_data_file:
+            st.session_state["selected_data_file"] = selected_data_file
+            # Clear cached load so the new file is actually read
+            load_and_prep_data.clear()
+            # Clear any appended data — it was for the old file
+            for _k in ["appended_df", "append_log", "_last_upload_sig",
+                       "needs_period_choice", "upload_period_choice"]:
+                st.session_state.pop(_k, None)
+            st.rerun()
+
+        # Status badge
+        _full_path = os.path.join(_app_dir, selected_data_file)
+        if os.path.exists(_full_path):
+            _size_kb = os.path.getsize(_full_path) // 1024
+            st.success(f"✅ `{selected_data_file}` ({_size_kb} KB)")
+        else:
+            st.error(f"❌ `{selected_data_file}` not accessible.")
+
+        # Refresh button — re-scans disk without changing selection
+        if st.button("🔄 Refresh file list", use_container_width=True, key="refresh_files"):
+            st.rerun()
+
+    st.markdown("**Append additional data**")
     st.caption(
-        "Upload a CSV or Excel whose columns match the base file. "
+        "Upload a CSV or Excel whose columns match the selected file. "
         "Rows are validated, deduplicated, and merged instantly."
     )
     appended_file = st.file_uploader(
@@ -1505,13 +1570,22 @@ def _parse_upload(uploaded_file) -> tuple:
     return _clean_main_df(raw), log
 
 
-# ── Load base data ────────────────────────────────────────────────────────────
-if not os.path.exists(DATA_FILE):
-    st.error(f"⚠️ Base data file `{DATA_FILE}` not found. Place it alongside `app.py`.")
+# ── Resolve which file to load ────────────────────────────────────────────────
+# Use the sidebar selection; fall back to the hardcoded default.
+DATA_FILE = st.session_state.get("selected_data_file", DATA_FILE_DEFAULT)
+_app_dir  = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else os.getcwd()
+_data_path = os.path.join(_app_dir, DATA_FILE)
+
+if not os.path.exists(_data_path):
+    st.error(
+        f"⚠️ Selected file **`{DATA_FILE}`** not found at `{_data_path}`.  \n"
+        "Use the **Data Management** panel in the sidebar to select an available file."
+    )
     st.stop()
 
-with st.spinner("Loading base data…"):
-    df_base = load_and_prep_data(DATA_FILE)
+# ── Load base data ────────────────────────────────────────────────────────────
+with st.spinner(f"Loading `{DATA_FILE}`…"):
+    df_base = load_and_prep_data(_data_path)
 
 if df_base.empty:
     st.error("Base data is empty. Check the file.")
