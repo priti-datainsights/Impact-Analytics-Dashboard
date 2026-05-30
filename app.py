@@ -1357,9 +1357,12 @@ with st.sidebar:
         # Detect change → clear cache and appended data so everything refreshes
         if st.session_state.get("selected_data_file") != selected_data_file:
             st.session_state["selected_data_file"] = selected_data_file
-            # Clear cached load so the new file is actually read
-            load_and_prep_data.clear()
-            # Clear any appended data — it was for the old file
+            # st.cache_data.clear() clears ALL cached functions app-wide.
+            # We use this instead of load_and_prep_data.clear() because the
+            # function is defined after this sidebar block, so calling it by
+            # name here would raise a NameError at sidebar-render time.
+            st.cache_data.clear()
+            # Clear any appended data — it was validated against the old file
             for _k in ["appended_df", "append_log", "_last_upload_sig",
                        "needs_period_choice", "upload_period_choice"]:
                 st.session_state.pop(_k, None)
