@@ -1209,7 +1209,7 @@ def render_ops_dashboard():
                 state_enr, x="Centres", y="State",
                 orientation="h", text="Centres",
                 color="Centres",
-                color_continuous_scale=[D["blue"] + "55", D["blue"]],
+                color_continuous_scale=[[0, "#cce0f5"], [1, D["blue"]]],
                 hover_data={"Enrolled": ":,", "Vols": True},
             )
             fig_sc.update_traces(textposition="outside", marker_line_width=0,
@@ -1525,7 +1525,7 @@ def render_ops_dashboard():
                 clh_by_subj, x="CLH", y="Subject_clean",
                 orientation="h", text="CLH",
                 color="CLH",
-                color_continuous_scale=[D["blue"] + "55", D["blue"]],
+                color_continuous_scale=[[0, "#cce0f5"], [1, D["blue"]]],
             )
             fig_clhs.update_traces(
                 texttemplate="%{text:,}", textposition="outside",
