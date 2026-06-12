@@ -425,43 +425,177 @@ def render_ops_dashboard():
     dropped = data["dropped"]
     new_reg = data["new_reg"]
 
-    # ── Sidebar filters ───────────────────────────────────────────────────────
+    # ── Active-tab tracking via session_state ────────────────────────────────
+    # Streamlit doesn't expose which tab is currently open, so we use two
+    # small toggle buttons in the sidebar to let the user switch filter context.
+    # This controls which filter group is rendered in the sidebar.
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = "vrm"
+
+    # ── Load DRM raw data upfront (cached) so sidebar can read its option lists
+    with st.spinner("Loading DRM data…"):
+        drm_data_raw = load_drm_data(DRM_DATA_PATH)
+
+    # ── Build sidebar — content switches based on active_tab flag ─────────────
     with st.sidebar:
         st.markdown("---")
-        st.header("🎯 VRM Filters")
 
-        sel_donors = st.multiselect(
-            "Donor",
-            options=sorted(df_raw["Donor"].dropna().unique()),
-            default=sorted(df_raw["Donor"].dropna().unique()),
-            key="ops_donor",
-        )
-        sel_states = st.multiselect(
-            "State (Centre)",
-            options=sorted(df_raw["State"].dropna().unique()),
-            default=sorted(df_raw["State"].dropna().unique()),
-            key="ops_state",
-        )
-        sel_subjects = st.multiselect(
-            "Subject",
-            options=sorted(df_raw["Subject_clean"].dropna().unique()),
-            default=sorted(df_raw["Subject_clean"].dropna().unique()),
-            key="ops_subject",
-        )
-        st.caption("Filters apply to the VRM tabs (Volunteers, Centres, Academic Health). "
-                   "The DRM Client Report tab uses the full DRM dataset independently.")
+        # Two toggle buttons to switch between VRM and DRM filter sets.
+        # Clicking a button sets session_state.active_tab and triggers a rerun.
+        tog1, tog2 = st.columns(2)
+        if tog1.button("📋 VRM Filters", use_container_width=True,
+                       type="primary" if st.session_state.active_tab == "vrm" else "secondary"):
+            st.session_state.active_tab = "vrm"
+            st.rerun()
+        if tog2.button("📊 DRM Filters", use_container_width=True,
+                       type="primary" if st.session_state.active_tab == "drm" else "secondary"):
+            st.session_state.active_tab = "drm"
+            st.rerun()
 
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── VRM FILTERS ───────────────────────────────────────────────────────
+        if st.session_state.active_tab == "vrm":
+            st.markdown(
+                "<div style='font-size:0.75em;font-weight:700;text-transform:uppercase;"
+                "letter-spacing:0.07em;color:#0094c9;margin-bottom:8px;'>🎯 VRM Filters</div>",
+                unsafe_allow_html=True,
+            )
+
+            _vrm_all_donors   = sorted(df_raw["Donor"].dropna().unique())
+            _vrm_all_states   = sorted(df_raw["State"].dropna().unique())
+            _vrm_all_subjects = sorted(df_raw["Subject_clean"].dropna().unique())
+
+            # Searchable multiselect: the placeholder text and compact widget
+            # give a "search" feel — user types and the list filters live.
+            sel_donors = st.multiselect(
+                "Donor",
+                options=_vrm_all_donors,
+                default=_vrm_all_donors,
+                placeholder="Type to search donors…",
+                key="ops_donor",
+            )
+
+            # Cascade: states narrow to only those linked to selected donors
+            if sel_donors:
+                _linked_states = sorted(
+                    df_raw[df_raw["Donor"].isin(sel_donors)]["State"].dropna().unique()
+                )
+            else:
+                _linked_states = _vrm_all_states
+
+            sel_states = st.multiselect(
+                "State (Centre)",
+                options=_linked_states,
+                default=_linked_states,
+                placeholder="Type to search states…",
+                key="ops_state",
+            )
+
+            # Cascade: subjects narrow to those in the selected donor + state combination
+            _vmask = pd.Series([True] * len(df_raw), index=df_raw.index)
+            if sel_donors:
+                _vmask &= df_raw["Donor"].isin(sel_donors)
+            if sel_states:
+                _vmask &= df_raw["State"].isin(sel_states)
+            _linked_subjects = sorted(df_raw[_vmask]["Subject_clean"].dropna().unique())
+
+            sel_subjects = st.multiselect(
+                "Subject",
+                options=_linked_subjects,
+                default=_linked_subjects,
+                placeholder="Type to search subjects…",
+                key="ops_subject",
+            )
+
+            st.caption(
+                "Filters cascade — selecting a donor narrows available states & subjects. "
+                "Applies to Volunteers, Centres and Academic Health tabs."
+            )
+
+            # DRM filter placeholders (full universe, unused while on VRM mode)
+            if drm_data_raw:
+                sel_drm_donors   = sorted(drm_data_raw["sess"]["Donor"].dropna().unique())
+                sel_drm_states   = sorted(drm_data_raw["sess"]["State"].dropna().unique())
+                sel_drm_subjects = sorted(drm_data_raw["sess"]["Subject_clean"].dropna().unique())
+            else:
+                sel_drm_donors = sel_drm_states = sel_drm_subjects = []
+
+        # ── DRM FILTERS ───────────────────────────────────────────────────────
+        else:
+            st.markdown(
+                "<div style='font-size:0.75em;font-weight:700;text-transform:uppercase;"
+                "letter-spacing:0.07em;color:#0f8a6e;margin-bottom:8px;'>📊 DRM Filters</div>",
+                unsafe_allow_html=True,
+            )
+
+            if drm_data_raw:
+                _sr = drm_data_raw["sess"]
+                _drm_all_donors   = sorted(_sr["Donor"].dropna().unique())
+                _drm_all_states   = sorted(_sr["State"].dropna().unique())
+                _drm_all_subjects = sorted(_sr["Subject_clean"].dropna().unique())
+
+                sel_drm_donors = st.multiselect(
+                    "Donor",
+                    options=_drm_all_donors,
+                    default=_drm_all_donors,
+                    placeholder="Type to search donors…",
+                    key="drm_donor",
+                )
+
+                # Cascade: states narrow to those linked to selected DRM donors
+                if sel_drm_donors:
+                    _drm_linked_states = sorted(
+                        _sr[_sr["Donor"].isin(sel_drm_donors)]["State"].dropna().unique()
+                    )
+                else:
+                    _drm_linked_states = _drm_all_states
+
+                sel_drm_states = st.multiselect(
+                    "State",
+                    options=_drm_linked_states,
+                    default=_drm_linked_states,
+                    placeholder="Type to search states…",
+                    key="drm_state",
+                )
+
+                # Cascade: subjects narrow to selected donor + state
+                _dmask = pd.Series([True] * len(_sr), index=_sr.index)
+                if sel_drm_donors:
+                    _dmask &= _sr["Donor"].isin(sel_drm_donors)
+                if sel_drm_states:
+                    _dmask &= _sr["State"].isin(sel_drm_states)
+                _drm_linked_subjects = sorted(_sr[_dmask]["Subject_clean"].dropna().unique())
+
+                sel_drm_subjects = st.multiselect(
+                    "Subject",
+                    options=_drm_linked_subjects,
+                    default=_drm_linked_subjects,
+                    placeholder="Type to search subjects…",
+                    key="drm_subject",
+                )
+
+                st.caption(
+                    "Filters cascade — selecting a donor narrows available states & subjects. "
+                    "Applies to the DRM Client Report tab only."
+                )
+            else:
+                st.warning("DRM file not found — filters unavailable.")
+                sel_drm_donors = sel_drm_states = sel_drm_subjects = []
+
+            # VRM filter placeholders (full universe, unused while on DRM mode)
+            sel_donors   = sorted(df_raw["Donor"].dropna().unique())
+            sel_states   = sorted(df_raw["State"].dropna().unique())
+            sel_subjects = sorted(df_raw["Subject_clean"].dropna().unique())
+
+    # ── Apply VRM filters to produce the working DataFrame ────────────────────
     df = df_raw[
         df_raw["Donor"].isin(sel_donors) &
         df_raw["State"].isin(sel_states) &
         df_raw["Subject_clean"].isin(sel_subjects)
     ].copy()
 
-    if df.empty:
-        st.warning("⚠️ No data for the current filter combination. Broaden your selection.")
-        return
-
-    vol_df = df.drop_duplicates(subset="Volunteer id").copy()
+    vol_df = df.drop_duplicates(subset="Volunteer id").copy() if not df.empty else df.copy()
 
     # ─────────────────────────────────────────────────────────────────────────
     # TABS
@@ -473,10 +607,18 @@ def render_ops_dashboard():
         "📊 DRM Client Report",
     ])
 
+
     # ═════════════════════════════════════════════════════════════════════════
     # TAB 1 — VOLUNTEERS
     # ═════════════════════════════════════════════════════════════════════════
     with tab_vol:
+
+        if df.empty:
+            st.info(
+                "🔍 No data available for the selected filters.\n\n"
+                "Try broadening your Donor, State, or Subject selection in the sidebar."
+            )
+            st.stop()
 
         total_vols_offering = len(df)
         unique_vols         = vol_df["Volunteer id"].nunique()
@@ -716,6 +858,13 @@ def render_ops_dashboard():
     # ═════════════════════════════════════════════════════════════════════════
     with tab_ctr:
 
+        if df.empty:
+            st.info(
+                "🔍 No data available for the selected filters.\n\n"
+                "Try broadening your Donor, State, or Subject selection in the sidebar."
+            )
+            st.stop()
+
         st.markdown("#### Centres & Volunteers by Donor")
         donor_summary = (
             df.groupby("Donor").agg(
@@ -890,6 +1039,13 @@ def render_ops_dashboard():
     # ═════════════════════════════════════════════════════════════════════════
     with tab_aca:
 
+        if df.empty:
+            st.info(
+                "🔍 No data available for the selected filters.\n\n"
+                "Try broadening your Donor, State, or Subject selection in the sidebar."
+            )
+            st.stop()
+
         st.markdown("#### CLH by Subject")
         clh_subj = (
             df.groupby("Subject_clean")["CLH"].sum()
@@ -1012,52 +1168,18 @@ def render_ops_dashboard():
     # ═════════════════════════════════════════════════════════════════════════
     with tab_drm:
 
-        with st.spinner("Loading DRM data…"):
-            drm_data = load_drm_data(DRM_DATA_PATH)
-
-        if not drm_data:
+        if not drm_data_raw:
             st.error(
                 f"⚠️ DRM file not found at `{DRM_DATA_PATH}`. "
                 "Place `DRM_May_2026.xlsx` alongside `app.py`."
             )
-            return
+            st.stop()
 
-        sess_raw = drm_data["sess"]
-        drm_raw  = drm_data["drm"]
-        od_raw   = drm_data["od"]
+        sess_raw = drm_data_raw["sess"]
+        drm_raw  = drm_data_raw["drm"]
+        od_raw   = drm_data_raw["od"]
 
-        # ── DRM-level sidebar filters (linked to global sidebar) ──────────────
-        # We build filter options from the DRM dataset so that the same sidebar
-        # Donor / State selections used in the VRM tabs also slice the DRM tab.
-        with st.sidebar:
-            st.markdown("---")
-            st.header("📊 DRM Filters")
-
-            drm_donors  = sorted(sess_raw["Donor"].dropna().unique())
-            drm_states  = sorted(sess_raw["State"].dropna().unique())
-            drm_subjects = sorted(sess_raw["Subject_clean"].dropna().unique())
-
-            sel_drm_donors = st.multiselect(
-                "Donor (DRM)",
-                options=drm_donors,
-                default=drm_donors,
-                key="drm_donor",
-            )
-            sel_drm_states = st.multiselect(
-                "State (DRM)",
-                options=drm_states,
-                default=drm_states,
-                key="drm_state",
-            )
-            sel_drm_subjects = st.multiselect(
-                "Subject (DRM)",
-                options=drm_subjects,
-                default=drm_subjects,
-                key="drm_subject",
-            )
-            st.caption("DRM filters apply to the DRM Client Report tab only.")
-
-        # Apply DRM filters
+        # Apply DRM filters (sel_drm_* come from the sidebar built above)
         sess = sess_raw[
             sess_raw["Donor"].isin(sel_drm_donors) &
             sess_raw["State"].isin(sel_drm_states) &
@@ -1074,6 +1196,18 @@ def render_ops_dashboard():
             od_raw["State"].isin(sel_drm_states) &
             od_raw["Subject_clean"].isin(sel_drm_subjects)
         ].copy()
+
+        # ── Guard: empty result after filtering ──────────────────────────────────
+        if sess.empty or drm.empty:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info(
+                "🔍 **No data available for the selected filters.**\n\n"
+                "The combination of Donor, State, and Subject you selected returned no sessions "
+                "or no active centres. Try:\n"
+                "- Selecting additional donors or states\n"
+                "- Switching to **DRM Filters** in the sidebar and broadening your selection"
+            )
+            st.stop()
 
         # ── Report Header ──────────────────────────────────────────────────────
         num_states_live   = drm["State"].nunique()
