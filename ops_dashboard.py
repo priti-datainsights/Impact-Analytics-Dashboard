@@ -2,12 +2,14 @@
 ops_dashboard.py
 ================
 Operations & Impact Command Center  —  eVidyaloka VRM
-Data source: VRM_May__2026.xlsx (multi-sheet Excel)
+Data source: auto-detected monthly workbooks named VRM_<Month>_<Year>.xlsx /
+DRM_<Month>_<Year>.xlsx (e.g. VRM_April_2026.xlsx), selected one month at a
+time via the in-page "Reporting Month" dropdown. See discover_monthly_files().
 
 Sheets used (VRM)
 ─────────────────
   Active VT            — primary operational data (one row per vol-offering)
-  Dropped VT           — volunteers who dropped their offering(s)
+  Dropped VT            — volunteers who dropped their offering(s)
   Newly Registered VT  — all volunteers who registered in the current period
 
 Sheets used (DRM)
@@ -39,17 +41,114 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+import re
+from datetime import datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
-DATA_PATH     = "VRM_May__2026.xlsx"
-DRM_DATA_PATH = "DRM_May_2026.xlsx"
+# Monthly data files live alongside this script and follow the naming
+# convention VRM_<Month>_<Year>.xlsx / DRM_<Month>_<Year>.xlsx, e.g.
+# "VRM_April_2026.xlsx" / "DRM_April_2026.xlsx". See discover_monthly_files().
+DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Sheets (VRM)
+# Matches VRM_April_2026.xlsx, DRM_May_2026.xlsx, VRM__May__2026.xlsx, etc.
+# (case-insensitive, tolerant of one-or-more underscores between tokens)
+MONTH_FILE_RE = re.compile(r"^(VRM|DRM)_+([A-Za-z]+)_+(\d{4})\.xlsx$", re.IGNORECASE)
+
+# Sheets (VRM) — target/canonical sheet names. Actual lookup is done via
+# _find_sheet(), which resolves these case/whitespace-insensitively so that
+# month-to-month export quirks (e.g. "Active Centers" vs "Active centers")
+# don't break loading.
 SHEET_ACTIVE  = "Active VT"
 SHEET_DROPPED = "Dropped VT"
 SHEET_NEW_REG = "Newly Registered VT "   # trailing space is in the file
+
+
+def _month_sort_key(month_name: str) -> int:
+    """Map a month name ('April', 'Apr', ...) to its calendar number (1-12)
+    for chronological sorting. Unrecognised names sort first (0)."""
+    for fmt in ("%B", "%b"):
+        try:
+            return datetime.strptime(month_name.strip(), fmt).month
+        except ValueError:
+            continue
+    return 0
+
+
+def discover_monthly_files(data_dir: str) -> dict:
+    """
+    Scan `data_dir` for files matching the VRM_<Month>_<Year>.xlsx /
+    DRM_<Month>_<Year>.xlsx naming convention (case-insensitive) and group
+    them by reporting month. Any other files in the directory are ignored.
+
+    Returns an ordered dict (oldest → newest), e.g.:
+        {
+          "April 2026": {"vrm": "/path/VRM_April_2026.xlsx", "drm": "/path/DRM_April_2026.xlsx"},
+          "May 2026":   {"vrm": "/path/VRM_May_2026.xlsx",   "drm": None},
+        }
+    A month is only included if a VRM file was found for it — the DRM file
+    is optional per month, since the DRM Client Report tab already shows
+    its own "file not found" message when missing.
+    """
+    months: dict[str, dict] = {}
+    try:
+        filenames = os.listdir(data_dir)
+    except OSError:
+        filenames = []
+
+    for fname in filenames:
+        match = MONTH_FILE_RE.match(fname)
+        if not match:
+            continue
+        kind, month_name, year = match.group(1).upper(), match.group(2).title(), match.group(3)
+        label = f"{month_name} {year}"
+        entry = months.setdefault(label, {"vrm": None, "drm": None})
+        entry["vrm" if kind == "VRM" else "drm"] = os.path.join(data_dir, fname)
+
+    months = {label: paths for label, paths in months.items() if paths["vrm"]}
+
+    def _sort_key(label: str):
+        month_name, year = label.rsplit(" ", 1)
+        return (int(year), _month_sort_key(month_name))
+
+    return dict(sorted(months.items(), key=lambda kv: _sort_key(kv[0])))
+
+
+def _find_sheet(xl: pd.ExcelFile, target: str) -> str:
+    """
+    Resolve a sheet name case/whitespace-insensitively against the sheets
+    actually present in `xl` (different months' exports sometimes vary
+    casing/spacing, e.g. "Active centers" vs "Active Centers"). Falls back
+    to the literal `target` — and lets pandas raise its normal error — if
+    no close match is found.
+    """
+    def _norm(s: str) -> str:
+        return " ".join(str(s).strip().lower().split())
+
+    target_norm = _norm(target)
+    for name in xl.sheet_names:
+        if _norm(name) == target_norm:
+            return name
+    return target
+
+
+def _apply_aliases(df: pd.DataFrame, aliases: dict) -> pd.DataFrame:
+    """
+    Rename legacy/alternate column names to their canonical name, but only
+    when the canonical column isn't already present. `aliases` maps
+    canonical_name -> [alt_name_1, alt_name_2, ...]. Used to smooth over
+    month-to-month column-naming drift in source workbooks.
+    """
+    rename_map = {}
+    for canonical, alternates in aliases.items():
+        if canonical in df.columns:
+            continue
+        for alt in alternates:
+            if alt in df.columns:
+                rename_map[alt] = canonical
+                break
+    return df.rename(columns=rename_map) if rename_map else df
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 P = {
@@ -191,8 +290,10 @@ def load_data(path: str) -> dict:
     if not os.path.exists(path):
         return {}
 
+    xl = pd.ExcelFile(path)
+
     # ── Active VT ─────────────────────────────────────────────────────────────
-    active = pd.read_excel(path, sheet_name=SHEET_ACTIVE)
+    active = pd.read_excel(xl, sheet_name=_find_sheet(xl, SHEET_ACTIVE))
     active.columns = active.columns.str.strip()
 
     active.rename(columns={
@@ -239,7 +340,7 @@ def load_data(path: str) -> dict:
             active[col] = pd.to_numeric(active[col], errors="coerce").fillna(0).astype(int)
 
     # ── Dropped VT ────────────────────────────────────────────────────────────
-    dropped = pd.read_excel(path, sheet_name=SHEET_DROPPED)
+    dropped = pd.read_excel(xl, sheet_name=_find_sheet(xl, SHEET_DROPPED))
     dropped.columns = dropped.columns.str.strip()
     if "State" in dropped.columns:
         dropped["State"] = (
@@ -250,7 +351,7 @@ def load_data(path: str) -> dict:
         )
 
     # ── Newly Registered VT ───────────────────────────────────────────────────
-    new_reg = pd.read_excel(path, sheet_name=SHEET_NEW_REG)
+    new_reg = pd.read_excel(xl, sheet_name=_find_sheet(xl, SHEET_NEW_REG))
     new_reg.columns = new_reg.columns.str.strip()
     new_reg["Date Joined"] = pd.to_datetime(new_reg["Date Joined"], errors="coerce")
     new_reg["Ref_group"]   = new_reg["Reference"].apply(_group_ref)
@@ -275,11 +376,23 @@ SUBJECT_NORM_DRM = {
     "Guest Sessions":                 "Guest Sessions",
 }
 
+# Some months' DRM exports use different column names on the "DRM"
+# (centre-level summary) sheet. Map canonical name -> legacy/alternate
+# names; _apply_aliases() renames the first match found, only when the
+# canonical column isn't already present.
+DRM_SHEET_ALIASES = {
+    "Donor Name":     ["Donor"],
+    "Live_CLH":       ["Live CLH"],
+    "Attendance %":   ["Live Attendance %"],
+}
+
 @st.cache_data(show_spinner=False)
 def load_drm_data(path: str) -> dict:
     """Load and clean all sheets from the DRM workbook."""
     if not os.path.exists(path):
         return {}
+
+    xl = pd.ExcelFile(path)
 
     def _fix_state(s):
         return (str(s)
@@ -288,7 +401,7 @@ def load_drm_data(path: str) -> dict:
                 .strip())
 
     # SESSION DUMP
-    sess = pd.read_excel(path, sheet_name="SESSION DUMP")
+    sess = pd.read_excel(xl, sheet_name=_find_sheet(xl, "SESSION DUMP"))
     sess.columns = sess.columns.str.strip()
     sess["Session_start"] = pd.to_datetime(sess["Session_start"], errors="coerce")
     sess["Attendance%"]   = pd.to_numeric(sess["Attendance%"], errors="coerce")
@@ -296,14 +409,16 @@ def load_drm_data(path: str) -> dict:
     sess["Donor"]         = sess["Donor"].fillna("Unknown")
     sess["Subject_clean"] = sess["Subject"].str.strip().map(SUBJECT_NORM_DRM).fillna(sess["Subject"])
     for col in ["Present/CLH", "Total students", "Boys", "Girls"]:
-        sess[col] = pd.to_numeric(sess[col], errors="coerce").fillna(0).astype(int)
+        if col in sess.columns:
+            sess[col] = pd.to_numeric(sess[col], errors="coerce").fillna(0).astype(int)
     sess["week"] = sess["Session_start"].dt.to_period("W").astype(str)
     sess["dow"]  = sess["Session_start"].dt.day_name()
     sess["hour"] = sess["Session_start"].dt.hour
 
     # DRM (centre-level summary)
-    drm = pd.read_excel(path, sheet_name="DRM")
+    drm = pd.read_excel(xl, sheet_name=_find_sheet(xl, "DRM"))
     drm.columns = drm.columns.str.strip()
+    drm = _apply_aliases(drm, DRM_SHEET_ALIASES)
     drm["State"]      = drm["State"].apply(_fix_state)
     drm["Donor Name"] = drm["Donor Name"].fillna("Unknown")
     for col in ["Planned","Scheduled","Completed","Offline","Cancelled",
@@ -322,16 +437,16 @@ def load_drm_data(path: str) -> dict:
                             / (drm["En Boys"] + drm["En Girls"]).replace(0, float("nan")) * 100).round(1)
 
     # ACTIVE CENTERS
-    ac = pd.read_excel(path, sheet_name="Active centers")
+    ac = pd.read_excel(xl, sheet_name=_find_sheet(xl, "Active centers"))
     ac.columns = ac.columns.str.strip()
 
     # OFFERING DETAILS
-    od = pd.read_excel(path, sheet_name="Offering Details")
+    od = pd.read_excel(xl, sheet_name=_find_sheet(xl, "Offering Details"))
     od.columns = od.columns.str.strip()
     od["Subject_clean"] = od["Subject"].str.strip().map(SUBJECT_NORM_DRM).fillna(od["Subject"])
 
     # NEW ENROLLED STUDENT
-    ne = pd.read_excel(path, sheet_name="New Enrolled student")
+    ne = pd.read_excel(xl, sheet_name=_find_sheet(xl, "New Enrolled student"))
     ne.columns = ne.columns.str.strip()
 
     return {"sess": sess, "drm": drm, "ac": ac, "od": od, "ne": ne}
@@ -402,22 +517,50 @@ def _insight_box(text: str, color: str = "#ba7517", bg: str = "#faeeda") -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 def render_ops_dashboard():
     st.title("🏢 Operations & Impact Command Center")
+
+    # ── Month selector — auto-detects VRM_<Month>_<Year> / DRM_<Month>_<Year> files ──
+    available_months = discover_monthly_files(DATA_DIR)
+
+    if not available_months:
+        st.markdown(
+            "<p style='color:gray;font-size:1.05em;margin-top:-12px;'>"
+            "Volunteer Relationship Management  ·  Centre Operations  ·  Academic Health</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("---")
+        st.error(
+            "⚠️ No monthly data files found. Place files named like "
+            "`VRM_April_2026.xlsx` (and optionally `DRM_April_2026.xlsx`) "
+            f"in `{DATA_DIR}`."
+        )
+        return
+
+    month_labels = list(available_months.keys())
+    selected_month = st.selectbox(
+        "📅 Reporting Month",
+        options=month_labels,
+        index=len(month_labels) - 1,   # default to most recent month
+        key="selected_month",
+    )
+    vrm_path = available_months[selected_month]["vrm"]
+    drm_path = available_months[selected_month]["drm"]
+
     st.markdown(
         "<p style='color:gray;font-size:1.05em;margin-top:-12px;'>"
         "Volunteer Relationship Management  ·  Centre Operations  ·  Academic Health"
-        "  —  May 2026</p>",
+        f"  —  {selected_month}</p>",
         unsafe_allow_html=True,
     )
     st.markdown("---")
 
     # ── Load VRM data ─────────────────────────────────────────────────────────
     with st.spinner("Loading VRM dataset…"):
-        data = load_data(DATA_PATH)
+        data = load_data(vrm_path)
 
     if not data:
         st.error(
-            f"⚠️ Data file not found at `{DATA_PATH}`. "
-            "Place `VRM_May__2026.xlsx` alongside `app.py`."
+            f"⚠️ Could not load the VRM file for {selected_month} "
+            f"(`{os.path.basename(vrm_path)}`)."
         )
         return
 
@@ -434,7 +577,7 @@ def render_ops_dashboard():
 
     # ── Load DRM raw data upfront (cached) so sidebar can read its option lists
     with st.spinner("Loading DRM data…"):
-        drm_data_raw = load_drm_data(DRM_DATA_PATH)
+        drm_data_raw = load_drm_data(drm_path) if drm_path else {}
 
     # ── Build sidebar — content switches based on active_tab flag ─────────────
     with st.sidebar:
@@ -866,18 +1009,19 @@ def render_ops_dashboard():
             st.stop()
 
         st.markdown("#### Centres & Volunteers by Donor")
-        donor_summary = (
-            df.groupby("Donor").agg(
-                Centres    =("Center name",  "nunique"),
-                Enrolled   =("Enrolled",     "sum"),
-                CLH        =("CLH",          "sum"),
-                Volunteers =("Volunteer id", "nunique"),
-                Completed  =("Completed",    "sum"),
-                Planned    =("Planned",      "sum"),
-                En_Boys    =("En Boys",      "sum"),
-                En_Girls   =("En Girls",     "sum"),
-            ).reset_index()
+        has_vrm_gender = {"En Boys", "En Girls"}.issubset(df.columns)
+        agg_dict = dict(
+            Centres    =("Center name",  "nunique"),
+            Enrolled   =("Enrolled",     "sum"),
+            CLH        =("CLH",          "sum"),
+            Volunteers =("Volunteer id", "nunique"),
+            Completed  =("Completed",    "sum"),
+            Planned    =("Planned",      "sum"),
         )
+        if has_vrm_gender:
+            agg_dict["En_Boys"]  = ("En Boys",  "sum")
+            agg_dict["En_Girls"] = ("En Girls", "sum")
+        donor_summary = df.groupby("Donor").agg(**agg_dict).reset_index()
         donor_summary["Completion %"] = (
             donor_summary["Completed"]
             / donor_summary["Planned"].replace(0, pd.NA) * 100
@@ -947,29 +1091,35 @@ def render_ops_dashboard():
         st.markdown("---")
 
         st.markdown("#### Enrolled Students — Gender Split by Donor")
-        st.caption("En Boys and En Girls columns are available in this dataset.")
-        gen_donor_melt = donor_summary[["Donor", "En_Boys", "En_Girls"]].melt(
-            id_vars="Donor", value_vars=["En_Boys", "En_Girls"],
-            var_name="Gender", value_name="Students"
-        )
-        gen_donor_melt["Gender"] = gen_donor_melt["Gender"].map(
-            {"En_Boys": "Boys", "En_Girls": "Girls"}
-        )
-        fig_gen_enr = px.bar(
-            gen_donor_melt, x="Donor", y="Students",
-            color="Gender", barmode="group",
-            text="Students",
-            color_discrete_map={"Boys": P["teal"], "Girls": P["coral"]},
-        )
-        fig_gen_enr.update_traces(
-            textposition="outside", texttemplate="%{text:,}",
-            hovertemplate="<b>%{x}</b> · %{fullData.name}: %{y:,}<extra></extra>",
-        )
-        _layout(fig_gen_enr, height=340, legend_bottom=True,
-                margin=dict(l=0, r=0, t=20, b=60))
-        fig_gen_enr.update_layout(xaxis_title="", yaxis_title="Enrolled Students")
-        fig_gen_enr.update_xaxes(tickangle=-15, showgrid=False)
-        st.plotly_chart(fig_gen_enr, use_container_width=True)
+        if has_vrm_gender:
+            st.caption("En Boys and En Girls columns are available in this dataset.")
+            gen_donor_melt = donor_summary[["Donor", "En_Boys", "En_Girls"]].melt(
+                id_vars="Donor", value_vars=["En_Boys", "En_Girls"],
+                var_name="Gender", value_name="Students"
+            )
+            gen_donor_melt["Gender"] = gen_donor_melt["Gender"].map(
+                {"En_Boys": "Boys", "En_Girls": "Girls"}
+            )
+            fig_gen_enr = px.bar(
+                gen_donor_melt, x="Donor", y="Students",
+                color="Gender", barmode="group",
+                text="Students",
+                color_discrete_map={"Boys": P["teal"], "Girls": P["coral"]},
+            )
+            fig_gen_enr.update_traces(
+                textposition="outside", texttemplate="%{text:,}",
+                hovertemplate="<b>%{x}</b> · %{fullData.name}: %{y:,}<extra></extra>",
+            )
+            _layout(fig_gen_enr, height=340, legend_bottom=True,
+                    margin=dict(l=0, r=0, t=20, b=60))
+            fig_gen_enr.update_layout(xaxis_title="", yaxis_title="Enrolled Students")
+            fig_gen_enr.update_xaxes(tickangle=-15, showgrid=False)
+            st.plotly_chart(fig_gen_enr, use_container_width=True)
+        else:
+            st.info(
+                "🔍 Gender breakdown (En Boys / En Girls) isn't available in this "
+                f"month's ({selected_month}) VRM export, so this chart is skipped."
+            )
 
         st.markdown("---")
 
@@ -1170,8 +1320,9 @@ def render_ops_dashboard():
 
         if not drm_data_raw:
             st.error(
-                f"⚠️ DRM file not found at `{DRM_DATA_PATH}`. "
-                "Place `DRM_May_2026.xlsx` alongside `app.py`."
+                f"⚠️ No DRM file found for **{selected_month}**. "
+                f"Place a file named like `DRM_{selected_month.replace(' ', '_')}.xlsx` "
+                f"in `{DATA_DIR}` to enable this report."
             )
             st.stop()
 
@@ -1224,7 +1375,7 @@ def render_ops_dashboard():
                         </h2>
                         <p style='color:rgba(255,255,255,0.82);margin:6px 0 0 0;font-size:0.95em;'>
                             Donor Relationship Management &nbsp;·&nbsp; Session Analytics
-                            &nbsp;·&nbsp; Centre Performance &nbsp;·&nbsp; May 2026
+                            &nbsp;·&nbsp; Centre Performance &nbsp;·&nbsp; {selected_month}
                         </p>
                     </div>
                     <div style='display:flex;gap:8px;flex-wrap:wrap;'>
@@ -1778,7 +1929,7 @@ def render_ops_dashboard():
         st.markdown(
             f"""<div style='text-align:center;color:#b2bec3;font-size:0.75em;
                     padding:16px;border-top:1px solid #dee2e6;margin-top:8px;'>
-                eVidyaloka Programme Impact Report &nbsp;·&nbsp; May 2026
+                eVidyaloka Programme Impact Report &nbsp;·&nbsp; {selected_month}
                 &nbsp;·&nbsp; {total_centres} centres &nbsp;·&nbsp;
                 {drm_total_vols} volunteers &nbsp;·&nbsp;
                 {total_students:,} students &nbsp;·&nbsp;
