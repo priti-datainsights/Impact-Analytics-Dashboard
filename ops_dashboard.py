@@ -512,6 +512,47 @@ def _insight_box(text: str, color: str = "#ba7517", bg: str = "#faeeda") -> str:
     )
 
 
+# Status label -> bar colour. Mirrors the same thresholds used to derive the
+# "Status" column (see _flag() in the Volunteer Performance Scorecard).
+STATUS_BAR_COLORS = {
+    "🟢 Strong":   P["green"],
+    "🟡 Moderate": P["amber"],
+    "🔴 At Risk":  P["red"],
+}
+
+
+def _style_status_bars(df: pd.DataFrame, status_col: str = "Status",
+                        bar_cols=("Comp %", "Att %"),
+                        colors: dict = STATUS_BAR_COLORS):
+    """
+    Return a pandas Styler for `df` where the in-cell progress bars in
+    `bar_cols` are coloured per-row according to that row's `status_col`
+    value, using `colors` (status label -> hex colour).
+
+    st.column_config.ProgressColumn only supports one fixed colour for an
+    entire column, so row-wise colouring isn't possible through it. Instead,
+    we call Styler.bar() once per status group, each time restricted via a
+    boolean `subset` to just that group's rows — so every row's bar is
+    rendered in its own status colour, while all bars still share the same
+    0–100 scale.
+    """
+    bar_cols = [c for c in bar_cols if c in df.columns]
+    styler = df.style
+
+    for status, color in colors.items():
+        mask = df[status_col] == status
+        if not mask.any() or not bar_cols:
+            continue
+        styler = styler.bar(
+            subset=pd.IndexSlice[mask, bar_cols],
+            color=color, vmin=0, vmax=100, align="left",
+        )
+
+    if bar_cols:
+        styler = styler.format({col: "{:.1f}%" for col in bar_cols})
+    return styler
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN RENDER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1859,18 +1900,12 @@ def render_ops_dashboard():
         }).sort_values("CLH", ascending=False)
 
         st.dataframe(
-            vol_display,
+            _style_status_bars(vol_display),
             use_container_width=True,
             hide_index=True,
             height=400,
             column_config={
-                "CLH":    st.column_config.NumberColumn("CLH",    format="%d"),
-                "Comp %": st.column_config.ProgressColumn(
-                    "Comp %", min_value=0, max_value=100, format="%.1f%%"
-                ),
-                "Att %":  st.column_config.ProgressColumn(
-                    "Att %",  min_value=0, max_value=100, format="%.1f%%"
-                ),
+                "CLH": st.column_config.NumberColumn("CLH", format="%d"),
             },
         )
 
