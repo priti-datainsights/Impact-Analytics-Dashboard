@@ -512,81 +512,6 @@ def _insight_box(text: str, color: str = "#ba7517", bg: str = "#faeeda") -> str:
     )
 
 
-# Status label -> bar colour. Mirrors the same thresholds used to derive the
-# "Status" column (see _flag() in the Volunteer Performance Scorecard).
-STATUS_BAR_COLORS = {
-    "🟢 Strong":   P["green"],
-    "🟡 Moderate": P["amber"],
-    "🔴 At Risk":  P["red"],
-}
-
-
-def _tier_from_pct(pct, high: float = 85, low: float = 60) -> str:
-    """
-    Map a percentage to the same Strong / Moderate / At Risk labels used in
-    STATUS_BAR_COLORS, for tables that don't already have their own
-    "Status" column (e.g. the centre scorecard, which colours by Comp %
-    directly). `high`/`low` set the tier thresholds.
-    """
-    if pd.isna(pct) or pct < low:
-        return "🔴 At Risk"
-    if pct < high:
-        return "🟡 Moderate"
-    return "🟢 Strong"
-
-
-def _style_status_bars(df: pd.DataFrame, status_col: str = "Status",
-                        bar_cols=("Comp %", "Att %"),
-                        colors: dict = STATUS_BAR_COLORS,
-                        hide_status_col: bool = False,
-                        extra_pct_cols=()):
-    """
-    Return a pandas Styler for `df` where the in-cell progress bars in
-    `bar_cols` are coloured per-row according to that row's `status_col`
-    value, using `colors` (status label -> hex colour).
-
-    st.column_config.ProgressColumn only supports one fixed colour for an
-    entire column, so row-wise colouring isn't possible through it. Instead,
-    we call Styler.bar() once per status group, each time restricted via a
-    boolean `subset` to just that group's rows — so every row's bar is
-    rendered in its own status colour, while all bars still share the same
-    0–100 scale.
-
-    NOTE: this Styler must be rendered with st.table(), not st.dataframe().
-    st.dataframe() strips the `background`/`background-image` CSS that
-    Styler.bar() draws its gradient with (only flat `background-color`
-    survives), so the bars render invisibly there. st.table() renders the
-    Styler's HTML as-is, bars included — the trade-off is it's a static
-    table (no in-app sorting, scrolling, or column resizing).
-
-    `status_col` can be a helper/tier column that exists only to drive the
-    colouring (not meant to be shown) — pass `hide_status_col=True` to keep
-    it out of the rendered output while still using it for the bar colours.
-    `extra_pct_cols` are additional already-percentage columns (not bars)
-    that should also be formatted with a trailing "%".
-    """
-    bar_cols = [c for c in bar_cols if c in df.columns]
-    styler = df.style.hide(axis="index")
-
-    if hide_status_col and status_col in df.columns:
-        styler = styler.hide(axis="columns", subset=[status_col])
-
-    for status, color in colors.items():
-        mask = df[status_col] == status
-        if not mask.any() or not bar_cols:
-            continue
-        styler = styler.bar(
-            subset=pd.IndexSlice[mask, bar_cols],
-            color=color, vmin=0, vmax=100, align="left",
-        )
-
-    pct_format = {c: "{:.1f}%" for c in bar_cols}
-    pct_format.update({c: "{:.1f}%" for c in extra_pct_cols if c in df.columns})
-    if pct_format:
-        styler = styler.format(pct_format)
-    return styler
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN RENDER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1933,10 +1858,20 @@ def render_ops_dashboard():
             "Avg_Att":      "Att %",
         }).sort_values("CLH", ascending=False)
 
-        st.table(_style_status_bars(vol_display))
-        st.caption(
-            "Static table (required for the colour-coded bars to render) — "
-            "sorted by CLH, descending."
+        st.dataframe(
+            vol_display,
+            use_container_width=True,
+            hide_index=True,
+            height=400,
+            column_config={
+                "CLH":    st.column_config.NumberColumn("CLH",    format="%d"),
+                "Comp %": st.column_config.ProgressColumn(
+                    "Comp %", min_value=0, max_value=100, format="%.1f%%"
+                ),
+                "Att %":  st.column_config.ProgressColumn(
+                    "Att %",  min_value=0, max_value=100, format="%.1f%%"
+                ),
+            },
         )
 
         st.markdown("---")
@@ -1948,7 +1883,7 @@ def render_ops_dashboard():
         st.caption(
             f"All {total_centres} active centres ranked by CLH delivered. &nbsp;"
             "🟢 ≥ 90% completion &nbsp; 🟡 70–90% &nbsp; 🔴 < 70% &nbsp;|&nbsp; "
-            "Static table (required for the colour-coded bars to render)."
+            "Click any column header to re-sort."
         )
         drm_display = drm[[
             "Center Name", "State", "Donor Name",
@@ -1969,26 +1904,24 @@ def render_ops_dashboard():
         drm_display["Comp %"] = drm_display["Comp %"].round(1)
         drm_display["Girl %"] = drm_display["Girl %"].round(1)
         drm_display["Canc %"] = drm_display["Canc %"].round(1)
-        # These are count columns loaded as float (NaN-safe upstream); cast
-        # to int now purely for display so they don't show a trailing ".0".
-        for _col in ["Vols", "Planned", "Completed", "Offline", "Cancelled",
-                     "CLH", "Enrolled", "En Boys", "En Girls"]:
-            drm_display[_col] = pd.to_numeric(drm_display[_col], errors="coerce").fillna(0).astype(int)
-
-        # No existing "Status" column here — derive a Strong/Moderate/At Risk
-        # tier straight from Comp %, using the same thresholds as the caption
-        # above (≥90 / 70–90 / <70), so the bars can be coloured the same way
-        # as the Volunteer Performance Scorecard.
-        drm_display["_Tier"] = drm_display["Comp %"].apply(
-            lambda v: _tier_from_pct(v, high=90, low=70)
-        )
         drm_display = drm_display.sort_values("CLH", ascending=False)
 
-        st.table(
-            _style_status_bars(
-                drm_display, status_col="_Tier", hide_status_col=True,
-                extra_pct_cols=["Girl %", "Canc %"],
-            )
+        st.dataframe(
+            drm_display,
+            use_container_width=True,
+            hide_index=True,
+            height=520,
+            column_config={
+                "Comp %": st.column_config.ProgressColumn(
+                    "Comp %", min_value=0, max_value=100, format="%.1f%%"
+                ),
+                "Att %":  st.column_config.ProgressColumn(
+                    "Att %",  min_value=0, max_value=100, format="%.1f%%"
+                ),
+                "CLH":    st.column_config.NumberColumn("CLH",    format="%d"),
+                "Girl %": st.column_config.NumberColumn("Girl %", format="%.1f%%"),
+                "Canc %": st.column_config.NumberColumn("Canc %", format="%.1f%%"),
+            },
         )
 
         # ── Footer ─────────────────────────────────────────────────────────────
