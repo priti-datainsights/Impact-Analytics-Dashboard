@@ -43,6 +43,7 @@ import plotly.graph_objects as go
 import os
 import re
 from datetime import datetime
+from topic_dashboard import show_topic_dashboard
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
@@ -743,13 +744,13 @@ def render_ops_dashboard():
     # ─────────────────────────────────────────────────────────────────────────
     # TABS
     # ─────────────────────────────────────────────────────────────────────────
-    tab_vol, tab_ctr, tab_aca, tab_drm = st.tabs([
-        "🙋 Volunteers",
-        "🏫 Centres",
-        "📚 Academic Health",
-        "📊 DRM Client Report",
-    ])
-
+    tab_vol, tab_ctr, tab_aca, tab_drm, tab_topic = st.tabs([
+    "🙋 Volunteers",
+    "🏫 Centres",
+    "📚 Academic Health",
+    "📊 DRM Client Report",
+    "📖 Topic Analysis",
+])
 
     # ═════════════════════════════════════════════════════════════════════════
     # TAB 1 — VOLUNTEERS
@@ -1937,3 +1938,5 @@ def render_ops_dashboard():
             </div>""",
             unsafe_allow_html=True,
         )
+with tab_topic:
+    show_topic_dashboard()
