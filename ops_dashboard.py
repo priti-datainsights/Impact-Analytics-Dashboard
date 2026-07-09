@@ -1939,4 +1939,4 @@ def render_ops_dashboard():
             unsafe_allow_html=True,
         )
 with tab_topic:
-    show_topic_dashboard()
+    st.title("✅ Topic Dashboard Loaded")
